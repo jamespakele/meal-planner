@@ -1,0 +1,35 @@
+{
+  "name": "meal-planner",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "dependencies": {
+    "next": "15.0.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "@supabase/supabase-js": "^2.44.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "@types/node": "^20.16.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.6.0",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "15.0.2",
+    "tailwindcss": "^3.4.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47"
+  },
+  "keywords": ["meal-planning", "saas", "next.js", "supabase"],
+  "author": "",
+  "license": "ISC",
+  "description": "Group-based meal planning SaaS with collaborative decision-making"
+}
