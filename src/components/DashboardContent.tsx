@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import MockAuthButton from './MockAuthButton'
 import GroupForm from './GroupForm'
 import { GroupData } from '@/lib/groupValidation'
+import { getStoredGroups, storeGroup, StoredGroup } from '@/lib/mockStorage'
 
 export default function DashboardContent() {
   const { user } = useMockAuth()
@@ -62,43 +63,26 @@ export default function DashboardContent() {
   )
 }
 
-interface Group {
-  id: string
-  name: string
-  adults: number
-  teens: number
-  kids: number
-  toddlers: number
-  dietary_restrictions: string[]
-  status: string
-  created_at: string
-}
-
 function GroupsTab() {
-  const [groups, setGroups] = useState<Group[]>([])
+  const [groups, setGroups] = useState<StoredGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateForm, setShowCreateForm] = useState(false)
-  const [editingGroup, setEditingGroup] = useState<Group | null>(null)
+  const [editingGroup, setEditingGroup] = useState<StoredGroup | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchGroups()
+    loadGroups()
   }, [])
 
-  const fetchGroups = async () => {
+  const loadGroups = () => {
     try {
       setLoading(true)
-      const response = await fetch('/api/groups')
-      const result = await response.json()
-      
-      if (result.success) {
-        setGroups(result.data)
-      } else {
-        setError('Failed to fetch groups')
-      }
+      const storedGroups = getStoredGroups()
+      setGroups(storedGroups)
+      setError(null)
     } catch (error) {
-      console.error('Error fetching groups:', error)
-      setError('Failed to fetch groups')
+      console.error('Error loading groups:', error)
+      setError('Failed to load groups')
     } finally {
       setLoading(false)
     }
@@ -106,23 +90,19 @@ function GroupsTab() {
 
   const handleCreateGroup = async (data: GroupData) => {
     try {
-      const response = await fetch('/api/groups', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-      })
-
-      const result = await response.json()
-
-      if (result.success) {
-        setGroups([result.data, ...groups])
-        setShowCreateForm(false)
-        setError(null)
-      } else {
-        setError(result.error || 'Failed to create group')
+      const newGroup: StoredGroup = {
+        id: `group-${Date.now()}`,
+        ...data,
+        user_id: 'mock-user-123',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       }
+      
+      storeGroup(newGroup)
+      setGroups([newGroup, ...groups])
+      setShowCreateForm(false)
+      setError(null)
     } catch (error) {
       console.error('Error creating group:', error)
       setError('Failed to create group')
@@ -131,23 +111,16 @@ function GroupsTab() {
 
   const handleEditGroup = async (data: GroupData) => {
     try {
-      const response = await fetch(`/api/groups/${editingGroup!.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-      })
-
-      const result = await response.json()
-
-      if (result.success) {
-        setGroups(groups.map(g => g.id === editingGroup!.id ? result.data : g))
-        setEditingGroup(null)
-        setError(null)
-      } else {
-        setError(result.error || 'Failed to update group')
+      const updatedGroup: StoredGroup = {
+        ...editingGroup!,
+        ...data,
+        updated_at: new Date().toISOString()
       }
+      
+      storeGroup(updatedGroup)
+      setGroups(groups.map(g => g.id === editingGroup!.id ? updatedGroup : g))
+      setEditingGroup(null)
+      setError(null)
     } catch (error) {
       console.error('Error updating group:', error)
       setError('Failed to update group')

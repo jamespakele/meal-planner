@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useState, useEffect } from 'react'
 
 interface MockUser {
   id: string
@@ -30,15 +30,24 @@ interface MockAuthProviderProps {
 }
 
 export const MockAuthProvider: React.FC<MockAuthProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<MockUser | null>(() => {
-    // Try to get user from localStorage on initial load
-    if (typeof window !== 'undefined') {
+  const [user, setUser] = useState<MockUser | null>(null)
+  const [loading, setLoading] = useState(true) // Start with loading true to prevent hydration issues
+  const [mounted, setMounted] = useState(false)
+
+  // Handle client-side hydration
+  useEffect(() => {
+    setMounted(true)
+    // Try to get user from localStorage after component mounts
+    try {
       const savedUser = localStorage.getItem('mockUser')
-      return savedUser ? JSON.parse(savedUser) : null
+      if (savedUser) {
+        setUser(JSON.parse(savedUser))
+      }
+    } catch (error) {
+      console.error('Error loading user from localStorage:', error)
     }
-    return null
-  })
-  const [loading, setLoading] = useState(false)
+    setLoading(false)
+  }, [])
 
   const signIn = (email: string, name?: string) => {
     setLoading(true)

@@ -2,7 +2,7 @@
 
 import { useMockAuth } from './MockAuthProvider'
 import { useRouter } from 'next/navigation'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 interface MockProtectedRouteProps {
   children: React.ReactNode
@@ -12,14 +12,20 @@ interface MockProtectedRouteProps {
 export default function MockProtectedRoute({ children, fallback }: MockProtectedRouteProps) {
   const { user, loading } = useMockAuth()
   const router = useRouter()
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
-    if (!loading && !user) {
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (mounted && !loading && !user) {
       router.push('/')
     }
-  }, [user, loading, router])
+  }, [user, loading, router, mounted])
 
-  if (loading) {
+  // Show loading during SSR and initial client hydration
+  if (!mounted || loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
