@@ -25,3 +25,6 @@ export const createServerClient = () => {
     }
   })
 }
+
+// Alias for test compatibility
+export { createServerClient as createClient }

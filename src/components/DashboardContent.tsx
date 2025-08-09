@@ -1,8 +1,10 @@
 'use client'
 
 import { useMockAuth } from './MockAuthProvider'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import MockAuthButton from './MockAuthButton'
+import GroupForm from './GroupForm'
+import { GroupData } from '@/lib/groupValidation'
 
 export default function DashboardContent() {
   const { user } = useMockAuth()
@@ -60,36 +62,240 @@ export default function DashboardContent() {
   )
 }
 
+interface Group {
+  id: string
+  name: string
+  adults: number
+  teens: number
+  kids: number
+  toddlers: number
+  dietary_restrictions: string[]
+  status: string
+  created_at: string
+}
+
 function GroupsTab() {
+  const [groups, setGroups] = useState<Group[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [editingGroup, setEditingGroup] = useState<Group | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetchGroups()
+  }, [])
+
+  const fetchGroups = async () => {
+    try {
+      setLoading(true)
+      const response = await fetch('/api/groups')
+      const result = await response.json()
+      
+      if (result.success) {
+        setGroups(result.data)
+      } else {
+        setError('Failed to fetch groups')
+      }
+    } catch (error) {
+      console.error('Error fetching groups:', error)
+      setError('Failed to fetch groups')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCreateGroup = async (data: GroupData) => {
+    try {
+      const response = await fetch('/api/groups', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        setGroups([result.data, ...groups])
+        setShowCreateForm(false)
+        setError(null)
+      } else {
+        setError(result.error || 'Failed to create group')
+      }
+    } catch (error) {
+      console.error('Error creating group:', error)
+      setError('Failed to create group')
+    }
+  }
+
+  const handleEditGroup = async (data: GroupData) => {
+    try {
+      const response = await fetch(`/api/groups/${editingGroup!.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        setGroups(groups.map(g => g.id === editingGroup!.id ? result.data : g))
+        setEditingGroup(null)
+        setError(null)
+      } else {
+        setError(result.error || 'Failed to update group')
+      }
+    } catch (error) {
+      console.error('Error updating group:', error)
+      setError('Failed to update group')
+    }
+  }
+
+  const handleCancelForm = () => {
+    setShowCreateForm(false)
+    setEditingGroup(null)
+    setError(null)
+  }
+
+  if (showCreateForm) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-white shadow overflow-hidden sm:rounded-md">
+          <div className="px-4 py-5 sm:p-6">
+            {error && (
+              <div className="mb-4 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded">
+                {error}
+              </div>
+            )}
+            <GroupForm
+              onSubmit={handleCreateGroup}
+              onCancel={handleCancelForm}
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (editingGroup) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-white shadow overflow-hidden sm:rounded-md">
+          <div className="px-4 py-5 sm:p-6">
+            {error && (
+              <div className="mb-4 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded">
+                {error}
+              </div>
+            )}
+            <GroupForm
+              onSubmit={handleEditGroup}
+              onCancel={handleCancelForm}
+              initialData={editingGroup}
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-900">Your Groups</h2>
-        <button className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+        <button 
+          onClick={() => setShowCreateForm(true)}
+          className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+        >
           Create New Group
         </button>
       </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
       
-      <div className="bg-white shadow overflow-hidden sm:rounded-md">
-        <div className="px-4 py-5 sm:p-6">
-          <div className="text-center py-12">
-            <div className="mx-auto h-12 w-12 text-gray-400">
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-              </svg>
-            </div>
-            <h3 className="mt-2 text-sm font-medium text-gray-900">No groups</h3>
-            <p className="mt-1 text-sm text-gray-500">
-              Get started by creating your first group.
-            </p>
-            <div className="mt-6">
-              <button className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-                Create Group
-              </button>
+      {loading ? (
+        <div className="bg-white shadow overflow-hidden sm:rounded-md">
+          <div className="px-4 py-5 sm:p-6">
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto"></div>
+              <p className="mt-2 text-sm text-gray-500">Loading groups...</p>
             </div>
           </div>
         </div>
-      </div>
+      ) : groups.length === 0 ? (
+        <div className="bg-white shadow overflow-hidden sm:rounded-md">
+          <div className="px-4 py-5 sm:p-6">
+            <div className="text-center py-12">
+              <div className="mx-auto h-12 w-12 text-gray-400">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              </div>
+              <h3 className="mt-2 text-sm font-medium text-gray-900">No groups</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Get started by creating your first group.
+              </p>
+              <div className="mt-6">
+                <button 
+                  onClick={() => setShowCreateForm(true)}
+                  className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+                >
+                  Create Group
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white shadow overflow-hidden sm:rounded-md">
+          <ul className="divide-y divide-gray-200">
+            {groups.map((group) => (
+              <li key={group.id} className="px-4 py-4 sm:px-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <p className="text-lg font-medium text-gray-900">{group.name}</p>
+                      <div className="ml-2 flex-shrink-0 flex">
+                        <p className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                          Active
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-2 sm:flex sm:justify-between">
+                      <div className="sm:flex">
+                        <p className="flex items-center text-sm text-gray-500">
+                          <span className="mr-2">👥</span>
+                          {group.adults} adults, {group.teens} teens, {group.kids} kids, {group.toddlers} toddlers
+                        </p>
+                      </div>
+                      {group.dietary_restrictions.length > 0 && (
+                        <div className="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
+                          <span className="mr-2">🥗</span>
+                          {group.dietary_restrictions.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="ml-4 flex-shrink-0">
+                    <button
+                      onClick={() => setEditingGroup(group)}
+                      className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 px-4 rounded mr-2"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
