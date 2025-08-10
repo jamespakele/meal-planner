@@ -332,10 +332,10 @@ function PlansTab() {
     }
   }
 
-  const handleCreatePlan = async (data: PlanData) => {
+  const handleCreatePlan = async (data: PlanData, planId?: string) => {
     try {
       const newPlan: StoredPlan = {
-        id: `plan-${Date.now()}`,
+        id: planId || `plan-${Date.now()}`,
         ...data,
         user_id: 'mock-user-123',
         status: 'active',
@@ -353,7 +353,7 @@ function PlansTab() {
     }
   }
 
-  const handleEditPlan = async (data: PlanData) => {
+  const handleEditPlan = async (data: PlanData, planId?: string) => {
     try {
       const updatedPlan: StoredPlan = {
         ...editingPlan!,

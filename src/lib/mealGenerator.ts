@@ -462,12 +462,14 @@ Return ONLY valid JSON in this exact format:
     }))
 
     // Validate each generated meal
-    const validMeals = generatedMeals.filter(meal => {
+    const validMeals: GeneratedMeal[] = []
+    generatedMeals.forEach(meal => {
       const isValid = validateGeneratedMeal(meal)
-      if (!isValid) {
-        console.warn('Invalid meal generated:', meal.title)
+      if (isValid) {
+        validMeals.push(meal)
+      } else {
+        console.warn('Invalid meal generated:', (meal as any)?.title || 'Unknown')
       }
-      return isValid
     })
 
     if (validMeals.length === 0) {

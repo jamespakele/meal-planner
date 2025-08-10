@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect } from 'react'
 
-interface MockUser {
+export interface MockUser {
   id: string
   email: string
   name: string
