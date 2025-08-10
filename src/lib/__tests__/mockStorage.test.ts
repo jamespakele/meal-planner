@@ -143,7 +143,18 @@ describe('Mock Storage', () => {
       id: 'plan-123',
       name: 'Weekly Plan',
       week_start: '2024-12-01',
-      group_ids: ['group-456'],
+      group_meals: [
+        {
+          group_id: 'group-456',
+          meal_count: 3,
+          notes: 'Family meals'
+        },
+        {
+          group_id: 'group-789',
+          meal_count: 1,
+          notes: 'Special dietary needs'
+        }
+      ],
       notes: 'Test plan notes',
       user_id: 'user-789',
       status: 'active',

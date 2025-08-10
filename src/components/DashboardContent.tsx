@@ -392,11 +392,20 @@ function PlansTab() {
     setError(null)
   }
 
-  const getGroupNames = (groupIds: string[]) => {
-    return groupIds
-      .map(id => availableGroups.find(g => g.id === id)?.name)
-      .filter(Boolean)
-      .join(', ')
+  const getGroupMealsSummary = (groupMeals: StoredPlan['group_meals']) => {
+    const groupDetails = groupMeals.map(gm => {
+      const group = availableGroups.find(g => g.id === gm.group_id)
+      return {
+        name: group?.name || 'Unknown Group',
+        mealCount: gm.meal_count,
+        notes: gm.notes
+      }
+    })
+    return groupDetails
+  }
+
+  const getTotalMealCount = (groupMeals: StoredPlan['group_meals']) => {
+    return groupMeals.reduce((total, gm) => total + gm.meal_count, 0)
   }
 
   const formatDate = (dateString: string) => {
@@ -535,56 +544,85 @@ function PlansTab() {
       ) : (
         <div className="bg-white shadow overflow-hidden sm:rounded-md">
           <ul className="divide-y divide-gray-200">
-            {plans.map((plan) => (
-              <li key={plan.id} className="px-4 py-4 sm:px-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <p className="text-lg font-medium text-gray-900">{plan.name}</p>
-                      <div className="ml-2 flex-shrink-0 flex">
-                        <p className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                          Active
-                        </p>
+            {plans.map((plan) => {
+              const groupMealsSummary = getGroupMealsSummary(plan.group_meals)
+              const totalMeals = getTotalMealCount(plan.group_meals)
+              
+              return (
+                <li key={plan.id} className="px-4 py-4 sm:px-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <p className="text-lg font-medium text-gray-900">{plan.name}</p>
+                        <div className="ml-2 flex-shrink-0 flex space-x-2">
+                          <p className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                            {totalMeals} total meals
+                          </p>
+                          <p className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                            Active
+                          </p>
+                        </div>
                       </div>
+                      <div className="mt-2 sm:flex sm:justify-between">
+                        <div className="sm:flex">
+                          <p className="flex items-center text-sm text-gray-800">
+                            <span className="mr-2">📅</span>
+                            Week of {formatDate(plan.week_start)}
+                          </p>
+                        </div>
+                      </div>
+                      
+                      {/* Group Meal Assignments */}
+                      <div className="mt-3 space-y-2">
+                        <p className="text-sm font-medium text-gray-900">Meal Assignments:</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {groupMealsSummary.map((groupDetail, index) => (
+                            <div key={index} className="bg-gray-50 rounded-md p-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium text-gray-900">
+                                  {groupDetail.name}
+                                </span>
+                                <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-md">
+                                  {groupDetail.mealCount} meals
+                                </span>
+                              </div>
+                              {groupDetail.notes && (
+                                <p className="mt-1 text-xs text-gray-600">
+                                  {groupDetail.notes}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      {plan.notes && (
+                        <div className="mt-3">
+                          <p className="text-sm text-gray-600">
+                            <span className="mr-2">📝</span>
+                            <span className="font-medium">Plan Notes:</span> {plan.notes}
+                          </p>
+                        </div>
+                      )}
                     </div>
-                    <div className="mt-2 sm:flex sm:justify-between">
-                      <div className="sm:flex">
-                        <p className="flex items-center text-sm text-gray-800">
-                          <span className="mr-2">📅</span>
-                          Week of {formatDate(plan.week_start)}
-                        </p>
-                      </div>
-                      <div className="mt-2 flex items-center text-sm text-gray-800 sm:mt-0">
-                        <span className="mr-2">👥</span>
-                        Groups: {getGroupNames(plan.group_ids)}
-                      </div>
+                    <div className="ml-4 flex-shrink-0">
+                      <button
+                        onClick={() => setEditingPlan(plan)}
+                        className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded mr-2"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDeletePlan(plan.id)}
+                        className="bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded"
+                      >
+                        Delete
+                      </button>
                     </div>
-                    {plan.notes && (
-                      <div className="mt-2">
-                        <p className="text-sm text-gray-600">
-                          <span className="mr-2">📝</span>
-                          {plan.notes}
-                        </p>
-                      </div>
-                    )}
                   </div>
-                  <div className="ml-4 flex-shrink-0">
-                    <button
-                      onClick={() => setEditingPlan(plan)}
-                      className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded mr-2"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDeletePlan(plan.id)}
-                      className="bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}

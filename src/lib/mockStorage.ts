@@ -76,7 +76,7 @@ export interface StoredPlan {
   id: string
   name: string
   week_start: string
-  group_ids: string[]
+  group_meals: import('./planValidation').GroupMealAssignment[]
   notes?: string
   user_id: string
   status: string

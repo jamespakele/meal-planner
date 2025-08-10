@@ -8,7 +8,8 @@ import { PlanData } from '@/lib/planValidation'
 jest.mock('@/lib/planValidation', () => ({
   validatePlan: jest.fn(),
   COMMON_PLAN_DURATIONS: ['1 week', '2 weeks', '1 month'],
-  sanitizePlanName: jest.fn((name: string) => name.trim())
+  sanitizePlanName: jest.fn((name: string) => name.trim()),
+  GroupMealAssignment: {}
 }))
 
 // Mock the group storage functions
@@ -67,7 +68,7 @@ describe('PlanForm', () => {
       expect(screen.getByText('Create New Plan')).toBeInTheDocument()
       expect(screen.getByLabelText('Plan Name')).toBeInTheDocument()
       expect(screen.getByLabelText('Week Start Date')).toBeInTheDocument()
-      expect(screen.getByText('Select Groups')).toBeInTheDocument()
+      expect(screen.getByText('Assign Meals to Groups')).toBeInTheDocument()
       expect(screen.getByLabelText('Notes (Optional)')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Create Plan' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
@@ -77,7 +78,9 @@ describe('PlanForm', () => {
       const initialData: PlanData = {
         name: 'Weekly Plan',
         week_start: '2024-12-01',
-        group_ids: ['group-1'],
+        group_meals: [
+          { group_id: 'group-1', meal_count: 3, notes: 'Family meals' }
+        ],
         notes: 'Test notes'
       }
       
@@ -96,7 +99,7 @@ describe('PlanForm', () => {
       expect(screen.getByRole('button', { name: 'Update Plan' })).toBeInTheDocument()
     })
 
-    it('should display available groups as checkboxes', () => {
+    it('should display available groups with meal count controls', () => {
       render(<PlanForm onSubmit={mockOnSubmit} onCancel={mockOnCancel} />)
       
       expect(screen.getByText('Smith Family')).toBeInTheDocument()
@@ -105,6 +108,11 @@ describe('PlanForm', () => {
       expect(screen.getByText('2 adults, 0 teens, 2 kids, 1 toddlers')).toBeInTheDocument()
       expect(screen.getByText('vegetarian')).toBeInTheDocument()
       expect(screen.getByText('gluten-free')).toBeInTheDocument()
+      
+      // Should show meal count controls for each group
+      expect(screen.getAllByText('Meals:')).toHaveLength(2)
+      expect(screen.getAllByRole('button', { name: '−' })).toHaveLength(2)
+      expect(screen.getAllByRole('button', { name: '+' })).toHaveLength(2)
     })
 
     it('should show message when no groups available', () => {
@@ -140,24 +148,34 @@ describe('PlanForm', () => {
       expect(dateInput).toHaveValue('2024-12-15')
     })
 
-    it('should toggle group selection', async () => {
+    it('should update meal counts using controls', async () => {
       const user = userEvent.setup()
       render(<PlanForm onSubmit={mockOnSubmit} onCancel={mockOnCancel} />)
       
-      const smithFamilyCheckbox = screen.getByRole('checkbox', { name: /Smith Family/i })
-      const johnsonFamilyCheckbox = screen.getByRole('checkbox', { name: /Johnson Family/i })
+      const mealCountInputs = screen.getAllByRole('spinbutton')
+      const incrementButtons = screen.getAllByRole('button', { name: '+' })
+      const decrementButtons = screen.getAllByRole('button', { name: '−' })
       
-      expect(smithFamilyCheckbox).not.toBeChecked()
-      expect(johnsonFamilyCheckbox).not.toBeChecked()
+      // Initially all meal counts should be 0
+      expect(mealCountInputs[0]).toHaveValue(0)
+      expect(mealCountInputs[1]).toHaveValue(0)
       
-      await user.click(smithFamilyCheckbox)
-      expect(smithFamilyCheckbox).toBeChecked()
+      // Increment first group meal count
+      await user.click(incrementButtons[0])
+      expect(mealCountInputs[0]).toHaveValue(1)
       
-      await user.click(johnsonFamilyCheckbox)
-      expect(johnsonFamilyCheckbox).toBeChecked()
+      // Increment second group meal count
+      await user.click(incrementButtons[1])
+      expect(mealCountInputs[1]).toHaveValue(1)
       
-      await user.click(smithFamilyCheckbox)
-      expect(smithFamilyCheckbox).not.toBeChecked()
+      // Decrement first group back to 0
+      await user.click(decrementButtons[0])
+      expect(mealCountInputs[0]).toHaveValue(0)
+      
+      // Type directly in input
+      await user.clear(mealCountInputs[1])
+      await user.type(mealCountInputs[1], '5')
+      expect(mealCountInputs[1]).toHaveValue(5)
     })
 
     it('should update notes field', async () => {
@@ -188,7 +206,7 @@ describe('PlanForm', () => {
         errors: {
           name: ['Name is required'],
           week_start: ['Week start must be a valid date'],
-          group_ids: ['At least one group must be selected'],
+          group_meals: ['At least one group must be assigned meals'],
           notes: ['Notes must be 500 characters or less']
         }
       })
@@ -196,13 +214,17 @@ describe('PlanForm', () => {
       const user = userEvent.setup()
       render(<PlanForm onSubmit={mockOnSubmit} onCancel={mockOnCancel} />)
       
+      // Add at least one meal to enable the submit button
+      const incrementButtons = screen.getAllByRole('button', { name: '+' })
+      await user.click(incrementButtons[0])
+      
       const submitButton = screen.getByRole('button', { name: 'Create Plan' })
       await user.click(submitButton)
       
       await waitFor(() => {
         expect(screen.getByText('Name is required')).toBeInTheDocument()
         expect(screen.getByText('Week start must be a valid date')).toBeInTheDocument()
-        expect(screen.getByText('At least one group must be selected')).toBeInTheDocument()
+        expect(screen.getByText('At least one group must be assigned meals')).toBeInTheDocument()
         expect(screen.getByText('Notes must be 500 characters or less')).toBeInTheDocument()
       })
       
@@ -220,6 +242,10 @@ describe('PlanForm', () => {
       
       const user = userEvent.setup()
       render(<PlanForm onSubmit={mockOnSubmit} onCancel={mockOnCancel} />)
+      
+      // Add at least one meal to enable the submit button
+      const incrementButtons = screen.getAllByRole('button', { name: '+' })
+      await user.click(incrementButtons[0])
       
       const submitButton = screen.getByRole('button', { name: 'Create Plan' })
       await user.click(submitButton)
@@ -246,7 +272,12 @@ describe('PlanForm', () => {
       // Fill in the form
       await user.type(screen.getByLabelText('Plan Name'), 'Test Plan')
       await user.type(screen.getByLabelText('Week Start Date'), '2024-12-01')
-      await user.click(screen.getByRole('checkbox', { name: /Smith Family/i }))
+      
+      // Assign meals to first group
+      const incrementButtons = screen.getAllByRole('button', { name: '+' })
+      await user.click(incrementButtons[0]) // Set Smith Family to 1 meal
+      await user.click(incrementButtons[0]) // Set Smith Family to 2 meals
+      
       await user.type(screen.getByLabelText('Notes (Optional)'), 'Test notes')
       
       const submitButton = screen.getByRole('button', { name: 'Create Plan' })
@@ -256,13 +287,13 @@ describe('PlanForm', () => {
         expect(mockValidatePlan).toHaveBeenCalledWith({
           name: 'Test Plan',
           week_start: '2024-12-01',
-          group_ids: ['group-1'],
+          group_meals: [{ group_id: 'group-1', meal_count: 2, notes: undefined }],
           notes: 'Test notes'
         })
         expect(mockOnSubmit).toHaveBeenCalledWith({
           name: 'Test Plan',
           week_start: '2024-12-01',
-          group_ids: ['group-1'],
+          group_meals: [{ group_id: 'group-1', meal_count: 2, notes: undefined }],
           notes: 'Test notes'
         })
       })
@@ -278,7 +309,10 @@ describe('PlanForm', () => {
       // Fill in the form
       await user.type(screen.getByLabelText('Plan Name'), 'Test Plan')
       await user.type(screen.getByLabelText('Week Start Date'), '2024-12-01')
-      await user.click(screen.getByRole('checkbox', { name: /Smith Family/i }))
+      
+      // Assign meals to first group
+      const incrementButtons = screen.getAllByRole('button', { name: '+' })
+      await user.click(incrementButtons[0])
       
       const submitButton = screen.getByRole('button', { name: 'Create Plan' })
       await user.click(submitButton)
@@ -302,7 +336,10 @@ describe('PlanForm', () => {
       // Fill in the form
       await user.type(screen.getByLabelText('Plan Name'), 'Test Plan')
       await user.type(screen.getByLabelText('Week Start Date'), '2024-12-01')
-      await user.click(screen.getByRole('checkbox', { name: /Smith Family/i }))
+      
+      // Assign meals to first group
+      const incrementButtons = screen.getAllByRole('button', { name: '+' })
+      await user.click(incrementButtons[0])
       
       const submitButton = screen.getByRole('button', { name: 'Create Plan' })
       await user.click(submitButton)
@@ -320,7 +357,10 @@ describe('PlanForm', () => {
       const initialData: PlanData = {
         name: 'Existing Plan',
         week_start: '2024-12-01',
-        group_ids: ['group-1', 'group-2'],
+        group_meals: [
+          { group_id: 'group-1', meal_count: 3, notes: 'Family meals' },
+          { group_id: 'group-2', meal_count: 2, notes: 'Special diet' }
+        ],
         notes: 'Existing notes'
       }
       
@@ -336,16 +376,27 @@ describe('PlanForm', () => {
       expect(screen.getByDisplayValue('2024-12-01')).toBeInTheDocument()
       expect(screen.getByDisplayValue('Existing notes')).toBeInTheDocument()
       
-      // Both groups should be selected
-      expect(screen.getByRole('checkbox', { name: /Smith Family/i })).toBeChecked()
-      expect(screen.getByRole('checkbox', { name: /Johnson Family/i })).toBeChecked()
+      // Both groups should show their assigned meal counts
+      const mealCountInputs = screen.getAllByRole('spinbutton')
+      expect(mealCountInputs[0]).toHaveValue(3) // Smith Family
+      expect(mealCountInputs[1]).toHaveValue(2) // Johnson Family
+      
+      // Should show group-specific notes
+      expect(screen.getByDisplayValue('Family meals')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('Special diet')).toBeInTheDocument()
+      
+      // Should show total meal count
+      expect(screen.getByText('Total: 5 meals')).toBeInTheDocument()
     })
 
     it('should handle missing optional fields in initial data', () => {
       const initialData: PlanData = {
         name: 'Minimal Plan',
         week_start: '2024-12-01',
-        group_ids: ['group-1']
+        group_meals: [
+          { group_id: 'group-1', meal_count: 1 }
+          // notes is optional in group meals
+        ]
         // notes is optional and not provided
       }
       
@@ -360,6 +411,11 @@ describe('PlanForm', () => {
       expect(screen.getByDisplayValue('Minimal Plan')).toBeInTheDocument()
       expect(screen.getByDisplayValue('2024-12-01')).toBeInTheDocument()
       expect(screen.getByLabelText('Notes (Optional)')).toHaveValue('')
+      
+      // Should show 1 meal assigned to first group
+      const mealCountInputs = screen.getAllByRole('spinbutton')
+      expect(mealCountInputs[0]).toHaveValue(1)
+      expect(mealCountInputs[1]).toHaveValue(0)
     })
   })
 })
