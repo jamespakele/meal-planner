@@ -4,8 +4,10 @@ import { useMockAuth } from './MockAuthProvider'
 import { useState, useEffect } from 'react'
 import MockAuthButton from './MockAuthButton'
 import GroupForm from './GroupForm'
+import PlanForm from './PlanForm'
 import { GroupData } from '@/lib/groupValidation'
-import { getStoredGroups, storeGroup, removeStoredGroup, StoredGroup } from '@/lib/mockStorage'
+import { PlanData } from '@/lib/planValidation'
+import { getStoredGroups, storeGroup, removeStoredGroup, StoredGroup, getStoredPlans, storePlan, removeStoredPlan, StoredPlan } from '@/lib/mockStorage'
 
 export default function DashboardContent() {
   const { user } = useMockAuth()
@@ -295,38 +297,297 @@ function GroupsTab() {
 }
 
 function PlansTab() {
+  const [plans, setPlans] = useState<StoredPlan[]>([])
+  const [availableGroups, setAvailableGroups] = useState<StoredGroup[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [editingPlan, setEditingPlan] = useState<StoredPlan | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    loadPlans()
+    loadGroups()
+  }, [])
+
+  const loadPlans = () => {
+    try {
+      setLoading(true)
+      const storedPlans = getStoredPlans()
+      setPlans(storedPlans)
+      setError(null)
+    } catch (error) {
+      console.error('Error loading plans:', error)
+      setError('Failed to load plans')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadGroups = () => {
+    try {
+      const storedGroups = getStoredGroups()
+      setAvailableGroups(storedGroups)
+    } catch (error) {
+      console.error('Error loading groups:', error)
+    }
+  }
+
+  const handleCreatePlan = async (data: PlanData) => {
+    try {
+      const newPlan: StoredPlan = {
+        id: `plan-${Date.now()}`,
+        ...data,
+        user_id: 'mock-user-123',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+      
+      storePlan(newPlan)
+      setPlans([newPlan, ...plans])
+      setShowCreateForm(false)
+      setError(null)
+    } catch (error) {
+      console.error('Error creating plan:', error)
+      setError('Failed to create plan')
+    }
+  }
+
+  const handleEditPlan = async (data: PlanData) => {
+    try {
+      const updatedPlan: StoredPlan = {
+        ...editingPlan!,
+        ...data,
+        updated_at: new Date().toISOString()
+      }
+      
+      storePlan(updatedPlan)
+      setPlans(plans.map(p => p.id === editingPlan!.id ? updatedPlan : p))
+      setEditingPlan(null)
+      setError(null)
+    } catch (error) {
+      console.error('Error updating plan:', error)
+      setError('Failed to update plan')
+    }
+  }
+
+  const handleDeletePlan = async (planId: string) => {
+    if (!confirm('Are you sure you want to delete this plan? This action cannot be undone.')) {
+      return
+    }
+
+    try {
+      removeStoredPlan(planId)
+      setPlans(plans.filter(p => p.id !== planId))
+      setError(null)
+    } catch (error) {
+      console.error('Error deleting plan:', error)
+      setError('Failed to delete plan')
+    }
+  }
+
+  const handleCancelForm = () => {
+    setShowCreateForm(false)
+    setEditingPlan(null)
+    setError(null)
+  }
+
+  const getGroupNames = (groupIds: string[]) => {
+    return groupIds
+      .map(id => availableGroups.find(g => g.id === id)?.name)
+      .filter(Boolean)
+      .join(', ')
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    })
+  }
+
+  const noGroupsAvailable = availableGroups.length === 0
+
+  if (showCreateForm) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-white shadow overflow-hidden sm:rounded-md">
+          <div className="px-4 py-5 sm:p-6">
+            {error && (
+              <div className="mb-4 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded">
+                {error}
+              </div>
+            )}
+            <PlanForm
+              onSubmit={handleCreatePlan}
+              onCancel={handleCancelForm}
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (editingPlan) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-white shadow overflow-hidden sm:rounded-md">
+          <div className="px-4 py-5 sm:p-6">
+            {error && (
+              <div className="mb-4 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded">
+                {error}
+              </div>
+            )}
+            <PlanForm
+              onSubmit={handleEditPlan}
+              onCancel={handleCancelForm}
+              initialData={editingPlan}
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-900">Meal Plans</h2>
-        <button className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
-          Generate New Plan
+        <button 
+          onClick={() => setShowCreateForm(true)}
+          disabled={noGroupsAvailable}
+          className={`font-bold py-2 px-4 rounded ${
+            noGroupsAvailable
+              ? 'bg-gray-400 text-white cursor-not-allowed'
+              : 'bg-green-500 hover:bg-green-700 text-white'
+          }`}
+        >
+          {noGroupsAvailable ? 'Create Group First' : 'Create New Plan'}
         </button>
       </div>
-      
-      <div className="bg-white shadow overflow-hidden sm:rounded-md">
-        <div className="px-4 py-5 sm:p-6">
-          <div className="text-center py-12">
-            <div className="mx-auto h-12 w-12 text-gray-600">
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
+
+      {noGroupsAvailable && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <svg className="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
               </svg>
             </div>
-            <h3 className="mt-2 text-sm font-medium text-gray-900">No meal plans</h3>
-            <p className="mt-1 text-sm text-gray-700">
-              Create a group first, then generate your first meal plan.
-            </p>
-            <div className="mt-6">
-              <button 
-                className="bg-gray-400 text-white font-bold py-2 px-4 rounded cursor-not-allowed"
-                disabled
-              >
-                Generate Plan (Create Group First)
-              </button>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-yellow-800">
+                No groups available
+              </h3>
+              <div className="mt-2 text-sm text-yellow-700">
+                <p>You need to create at least one group before you can create meal plans. Groups define who the meals are for and any dietary restrictions.</p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
+      
+      {loading ? (
+        <div className="bg-white shadow overflow-hidden sm:rounded-md">
+          <div className="px-4 py-5 sm:p-6">
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto"></div>
+              <p className="mt-2 text-sm text-gray-700">Loading plans...</p>
+            </div>
+          </div>
+        </div>
+      ) : plans.length === 0 ? (
+        <div className="bg-white shadow overflow-hidden sm:rounded-md">
+          <div className="px-4 py-5 sm:p-6">
+            <div className="text-center py-12">
+              <div className="mx-auto h-12 w-12 text-gray-700">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                </svg>
+              </div>
+              <h3 className="mt-2 text-sm font-medium text-gray-900">No meal plans</h3>
+              <p className="mt-1 text-sm text-gray-800">
+                Get started by creating your first meal plan.
+              </p>
+              <div className="mt-6">
+                <button 
+                  onClick={() => setShowCreateForm(true)}
+                  disabled={noGroupsAvailable}
+                  className={`font-bold py-2 px-4 rounded ${
+                    noGroupsAvailable
+                      ? 'bg-gray-400 text-white cursor-not-allowed'
+                      : 'bg-green-500 hover:bg-green-700 text-white'
+                  }`}
+                >
+                  {noGroupsAvailable ? 'Create Group First' : 'Create Plan'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white shadow overflow-hidden sm:rounded-md">
+          <ul className="divide-y divide-gray-200">
+            {plans.map((plan) => (
+              <li key={plan.id} className="px-4 py-4 sm:px-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <p className="text-lg font-medium text-gray-900">{plan.name}</p>
+                      <div className="ml-2 flex-shrink-0 flex">
+                        <p className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                          Active
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-2 sm:flex sm:justify-between">
+                      <div className="sm:flex">
+                        <p className="flex items-center text-sm text-gray-800">
+                          <span className="mr-2">📅</span>
+                          Week of {formatDate(plan.week_start)}
+                        </p>
+                      </div>
+                      <div className="mt-2 flex items-center text-sm text-gray-800 sm:mt-0">
+                        <span className="mr-2">👥</span>
+                        Groups: {getGroupNames(plan.group_ids)}
+                      </div>
+                    </div>
+                    {plan.notes && (
+                      <div className="mt-2">
+                        <p className="text-sm text-gray-600">
+                          <span className="mr-2">📝</span>
+                          {plan.notes}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="ml-4 flex-shrink-0">
+                    <button
+                      onClick={() => setEditingPlan(plan)}
+                      className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded mr-2"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeletePlan(plan.id)}
+                      className="bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
