@@ -21,7 +21,7 @@ export default function MockAuthButton() {
   if (user) {
     return (
       <div className="flex items-center space-x-4">
-        <span className="text-sm text-gray-700">
+        <span className="text-sm text-gray-800">
           Welcome, {user.name}
         </span>
         <button

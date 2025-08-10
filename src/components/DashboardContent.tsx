@@ -19,7 +19,7 @@ export default function DashboardContent() {
           <div className="flex justify-between items-center py-6">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Meal Planner Dashboard</h1>
-              <p className="text-gray-600">Welcome back, {user?.name || user?.email}</p>
+              <p className="text-gray-700">Welcome back, {user?.name || user?.email}</p>
             </div>
             <MockAuthButton />
           </div>
@@ -35,7 +35,7 @@ export default function DashboardContent() {
               className={`py-2 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'groups'
                   ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
               }`}
             >
               Groups
@@ -45,7 +45,7 @@ export default function DashboardContent() {
               className={`py-2 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'plans'
                   ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
               }`}
             >
               Meal Plans
@@ -197,7 +197,7 @@ function GroupsTab() {
           <div className="px-4 py-5 sm:p-6">
             <div className="text-center py-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto"></div>
-              <p className="mt-2 text-sm text-gray-500">Loading groups...</p>
+              <p className="mt-2 text-sm text-gray-700">Loading groups...</p>
             </div>
           </div>
         </div>
@@ -205,13 +205,13 @@ function GroupsTab() {
         <div className="bg-white shadow overflow-hidden sm:rounded-md">
           <div className="px-4 py-5 sm:p-6">
             <div className="text-center py-12">
-              <div className="mx-auto h-12 w-12 text-gray-400">
+              <div className="mx-auto h-12 w-12 text-gray-700">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                 </svg>
               </div>
               <h3 className="mt-2 text-sm font-medium text-gray-900">No groups</h3>
-              <p className="mt-1 text-sm text-gray-500">
+              <p className="mt-1 text-sm text-gray-800">
                 Get started by creating your first group.
               </p>
               <div className="mt-6">
@@ -242,13 +242,13 @@ function GroupsTab() {
                     </div>
                     <div className="mt-2 sm:flex sm:justify-between">
                       <div className="sm:flex">
-                        <p className="flex items-center text-sm text-gray-500">
+                        <p className="flex items-center text-sm text-gray-800">
                           <span className="mr-2">👥</span>
                           {group.adults} adults, {group.teens} teens, {group.kids} kids, {group.toddlers} toddlers
                         </p>
                       </div>
                       {group.dietary_restrictions.length > 0 && (
-                        <div className="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
+                        <div className="mt-2 flex items-center text-sm text-gray-800 sm:mt-0">
                           <span className="mr-2">🥗</span>
                           {group.dietary_restrictions.join(', ')}
                         </div>
@@ -258,7 +258,7 @@ function GroupsTab() {
                   <div className="ml-4 flex-shrink-0">
                     <button
                       onClick={() => setEditingGroup(group)}
-                      className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 px-4 rounded mr-2"
+                      className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded mr-2"
                     >
                       Edit
                     </button>
@@ -286,13 +286,13 @@ function PlansTab() {
       <div className="bg-white shadow overflow-hidden sm:rounded-md">
         <div className="px-4 py-5 sm:p-6">
           <div className="text-center py-12">
-            <div className="mx-auto h-12 w-12 text-gray-400">
+            <div className="mx-auto h-12 w-12 text-gray-600">
               <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
               </svg>
             </div>
             <h3 className="mt-2 text-sm font-medium text-gray-900">No meal plans</h3>
-            <p className="mt-1 text-sm text-gray-500">
+            <p className="mt-1 text-sm text-gray-700">
               Create a group first, then generate your first meal plan.
             </p>
             <div className="mt-6">

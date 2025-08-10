@@ -116,7 +116,7 @@ export default function GroupForm({ onSubmit, onCancel, initialData }: GroupForm
   return (
     <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
       <div>
-        <h2 className="text-2xl font-bold mb-6">
+        <h2 className="text-2xl font-bold text-gray-900 mb-6">
           {isEditing ? 'Edit Group' : 'Create New Group'}
         </h2>
       </div>
@@ -244,7 +244,7 @@ export default function GroupForm({ onSubmit, onCancel, initialData }: GroupForm
               <button
                 type="button"
                 onClick={() => removeDietaryRestriction(index)}
-                className="ml-2 text-gray-500 hover:text-gray-700"
+                className="ml-2 text-gray-600 hover:text-gray-800"
                 aria-label={`Remove ${restriction}`}
               >
                 ×
@@ -303,7 +303,7 @@ export default function GroupForm({ onSubmit, onCancel, initialData }: GroupForm
         <button
           type="button"
           onClick={onCancel}
-          className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+          className="flex-1 bg-gray-200 text-gray-800 py-2 px-4 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
         >
           Cancel
         </button>

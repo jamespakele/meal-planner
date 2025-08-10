@@ -17,7 +17,7 @@ export default function AuthButton() {
   if (user) {
     return (
       <div className="flex items-center space-x-4">
-        <span className="text-sm text-gray-700">
+        <span className="text-sm text-gray-800">
           Welcome, {user.user_metadata?.full_name || user.email}
         </span>
         <button
