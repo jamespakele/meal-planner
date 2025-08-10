@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import MockAuthButton from './MockAuthButton'
 import GroupForm from './GroupForm'
 import { GroupData } from '@/lib/groupValidation'
-import { getStoredGroups, storeGroup, StoredGroup } from '@/lib/mockStorage'
+import { getStoredGroups, storeGroup, removeStoredGroup, StoredGroup } from '@/lib/mockStorage'
 
 export default function DashboardContent() {
   const { user } = useMockAuth()
@@ -131,6 +131,21 @@ function GroupsTab() {
     setShowCreateForm(false)
     setEditingGroup(null)
     setError(null)
+  }
+
+  const handleDeleteGroup = async (groupId: string) => {
+    if (!confirm('Are you sure you want to delete this group? This action cannot be undone.')) {
+      return
+    }
+
+    try {
+      removeStoredGroup(groupId)
+      setGroups(groups.filter(g => g.id !== groupId))
+      setError(null)
+    } catch (error) {
+      console.error('Error deleting group:', error)
+      setError('Failed to delete group')
+    }
   }
 
   if (showCreateForm) {
@@ -261,6 +276,12 @@ function GroupsTab() {
                       className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded mr-2"
                     >
                       Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteGroup(group.id)}
+                      className="bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded"
+                    >
+                      Delete
                     </button>
                   </div>
                 </div>
