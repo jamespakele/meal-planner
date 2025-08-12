@@ -26,7 +26,9 @@
       "Bash(rm:*)",
       "Bash(docker volume:*)",
       "Bash(rd:*)",
-      "Bash(npx jest:*)"
+      "Bash(npx jest:*)",
+      "Bash(npm run lint:*)",
+      "Bash(PORT=3000 npm run dev)"
     ]
   },
   "enableAllProjectMcpServers": true,

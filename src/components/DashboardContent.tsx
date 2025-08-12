@@ -4,6 +4,7 @@ import { useAuth } from './AuthProvider'
 import { useState, useEffect, useMemo } from 'react'
 import GroupForm from './GroupForm'
 import PlanForm from './PlanForm'
+import MealGenerationTrigger from './MealGenerationTrigger'
 import { GroupData } from '@/lib/groupValidation'
 import { PlanData } from '@/lib/planValidation'
 import { getSupabaseClient } from '@/lib/supabase/singleton'
@@ -358,8 +359,8 @@ function PlansTab() {
 
   useEffect(() => {
     if (user) {
-      loadPlans()
       loadGroups()
+      loadPlans()
     }
   }, [user])
 
@@ -375,6 +376,8 @@ function PlansTab() {
 
       if (error) throw error
       
+      console.log('Loaded plans:', plans) // Debug log
+      console.log('Available groups when loading plans:', availableGroups) // Debug log
       setPlans(plans || [])
       setError(null)
     } catch (error) {
@@ -397,8 +400,10 @@ function PlansTab() {
       if (error) throw error
       
       setAvailableGroups(groups || [])
+      return groups || []
     } catch (error) {
       console.error('Error loading groups:', error)
+      return []
     }
   }
 
@@ -480,6 +485,60 @@ function PlansTab() {
     setError(null)
   }
 
+  const handleMealGenerationSuccess = (planId: string, totalMeals: number) => {
+    // You could add a success notification here
+    console.log(`Successfully generated ${totalMeals} meals for plan ${planId}`)
+    // Optionally reload the plan to show any updated status
+    // loadPlans()
+  }
+
+  const handleMealGenerationError = (error: string) => {
+    setError(`Meal generation failed: ${error}`)
+  }
+
+  // Helper function to fix legacy group IDs in plans
+  const fixLegacyGroupIds = async (planId: string, groupMeals: any[]) => {
+    if (!availableGroups.length) return false
+
+    const needsUpdate = groupMeals.some(gm => gm.group_id.startsWith('group-'))
+    if (!needsUpdate) return false
+
+    console.log('Attempting to fix legacy group IDs for plan:', planId)
+
+    // Map legacy group IDs to current group IDs by index
+    const updatedGroupMeals = groupMeals.map((groupMeal, index) => {
+      if (groupMeal.group_id.startsWith('group-') && availableGroups[index]) {
+        console.log(`Mapping ${groupMeal.group_id} -> ${availableGroups[index].id} (${availableGroups[index].name})`)
+        return {
+          ...groupMeal,
+          group_id: availableGroups[index].id
+        }
+      }
+      return groupMeal
+    })
+
+    // Update the plan in the database
+    try {
+      const { error } = await supabase
+        .from('meal_plans')
+        .update({ group_meals: updatedGroupMeals })
+        .eq('id', planId)
+
+      if (error) {
+        console.error('Failed to update plan with correct group IDs:', error)
+        return false
+      }
+
+      console.log('Successfully updated plan with correct group IDs')
+      // Reload plans to reflect the changes
+      loadPlans()
+      return true
+    } catch (error) {
+      console.error('Error updating plan:', error)
+      return false
+    }
+  }
+
   const getGroupMealsSummary = (plan: any) => {
     if (!plan.group_meals || plan.group_meals.length === 0) {
       // Fallback for plans without group_meals data
@@ -487,12 +546,20 @@ function PlansTab() {
     }
 
     // Map the stored group_meals to display format
-    return plan.group_meals.map((groupMeal: any) => {
-      const group = availableGroups.find(g => g.id === groupMeal.group_id)
+    return plan.group_meals.map((groupMeal: any, index: number) => {
+      let group = availableGroups.find(g => g.id === groupMeal.group_id)
+      
+      // Fallback: If group not found (likely old mock data), try to map by index
+      if (!group && groupMeal.group_id.startsWith('group-')) {
+        console.warn(`Legacy group ID detected: ${groupMeal.group_id}, attempting to map to current group by index`)
+        group = availableGroups[index] // Try to map by index
+      }
+      
       return {
-        name: group?.name || `Group ${groupMeal.group_id}`,
+        name: group?.name || `Unmapped Group (${groupMeal.group_id.slice(-8)})`,
         mealCount: groupMeal.meal_count,
-        notes: groupMeal.notes || ''
+        notes: groupMeal.notes || '',
+        needsUpdate: !group || groupMeal.group_id.startsWith('group-') // Flag that this needs updating
       }
     })
   }
@@ -701,6 +768,28 @@ function PlansTab() {
                             ))}
                           </div>
                         )}
+                        
+                        {/* Legacy Group ID Warning */}
+                        {groupMealsSummary.some((gm: any) => gm.needsUpdate) && (
+                          <div className="bg-orange-50 border border-orange-200 rounded-md p-3">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-sm text-orange-800 font-medium">
+                                  ⚠️ This plan uses outdated group references
+                                </p>
+                                <p className="text-xs text-orange-700 mt-1">
+                                  Click "Fix Group References" to update to current groups
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => fixLegacyGroupIds(plan.id, plan.group_meals)}
+                                className="bg-orange-500 hover:bg-orange-600 text-white text-xs px-3 py-1 rounded"
+                              >
+                                Fix Group References
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       
                       {plan.notes && (
@@ -711,6 +800,15 @@ function PlansTab() {
                           </p>
                         </div>
                       )}
+                      
+                      {/* Meal Generation Section */}
+                      <div className="mt-4 border-t pt-4">
+                        <MealGenerationTrigger
+                          plan={plan}
+                          onSuccess={handleMealGenerationSuccess}
+                          onError={handleMealGenerationError}
+                        />
+                      </div>
                     </div>
                     <div className="ml-4 flex-shrink-0">
                       <button

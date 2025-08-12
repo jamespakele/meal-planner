@@ -1,343 +1,346 @@
 import React from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import '@testing-library/jest-dom'
+import MealGenerationTrigger from '../MealGenerationTrigger'
 
-// This component doesn't exist yet - we'll create it as part of the implementation
-// For now, we're defining the expected interface
-interface MealGenerationTriggerProps {
-  planId: string
-  planData: {
-    name: string
-    week_start: string
-    notes?: string
-  }
-  onGenerationComplete?: (jobId: string) => void
-  onError?: (error: string) => void
-}
+// Mock the meal generation service
+jest.mock('@/lib/mealGenerationService', () => ({
+  generateMealsForPlan: jest.fn(),
+}))
 
-// Mock implementation for testing
-const MockMealGenerationTrigger: React.FC<MealGenerationTriggerProps> = ({
-  planId,
-  planData,
-  onGenerationComplete,
-  onError
-}) => {
-  const [isGenerating, setIsGenerating] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
+// Mock the hooks
+jest.mock('@/hooks/useMealGenerationProgress', () => ({
+  useMealGenerationProgress: jest.fn(),
+}))
 
-  const handleGenerate = async () => {
-    setIsGenerating(true)
-    setError(null)
-    
-    try {
-      // Mock API call
-      const response = await fetch(`/api/plans/${planId}/generate-meals`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planData })
-      })
-      
-      if (!response.ok) {
-        throw new Error('Failed to start meal generation')
-      }
-      
-      const result = await response.json()
-      onGenerationComplete?.(result.jobId)
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error'
-      setError(errorMessage)
-      onError?.(errorMessage)
-    } finally {
-      setIsGenerating(false)
-    }
-  }
+import { generateMealsForPlan } from '@/lib/mealGenerationService'
+import { useMealGenerationProgress } from '@/hooks/useMealGenerationProgress'
 
-  return (
-    <div data-testid="meal-generation-trigger">
-      <button
-        onClick={handleGenerate}
-        disabled={isGenerating}
-        data-testid="generate-meals-btn"
-      >
-        {isGenerating ? 'Generating Meals...' : 'Generate Meals with AI'}
-      </button>
-      {error && (
-        <div data-testid="generation-error" className="error">
-          {error}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Mock the API endpoint
-const mockFetch = jest.fn()
-global.fetch = mockFetch
+const mockGenerateMealsForPlan = generateMealsForPlan as jest.MockedFunction<typeof generateMealsForPlan>
+const mockUseMealGenerationProgress = useMealGenerationProgress as jest.MockedFunction<typeof useMealGenerationProgress>
 
 describe('MealGenerationTrigger', () => {
-  const mockPlanData = {
+  const mockPlan = {
+    id: 'plan-1',
     name: 'Test Plan',
-    week_start: '2024-01-01',
-    notes: 'Test notes'
+    week_start: '2025-01-13',
+    group_meals: [
+      { group_id: 'group-1', meal_count: 7, notes: 'Test notes' }
+    ],
+    notes: 'Plan notes'
   }
 
-  const mockOnGenerationComplete = jest.fn()
-  const mockOnError = jest.fn()
+  const defaultProgressHookReturn = {
+    progress: 0,
+    status: 'idle' as const,
+    error: null,
+    currentStep: null,
+    totalMeals: null,
+    startPolling: jest.fn(),
+    stopPolling: jest.fn(),
+    reset: jest.fn(),
+  }
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockUseMealGenerationProgress.mockReturnValue(defaultProgressHookReturn)
   })
 
-  describe('Successful Generation', () => {
-    it('should trigger meal generation for existing plan', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ jobId: 'job-123', status: 'pending' })
-      })
-
-      const user = userEvent.setup()
-
-      render(
-        <MockMealGenerationTrigger
-          planId="plan-123"
-          planData={mockPlanData}
-          onGenerationComplete={mockOnGenerationComplete}
-          onError={mockOnError}
-        />
-      )
-
-      const generateButton = screen.getByTestId('generate-meals-btn')
-      expect(generateButton).toHaveTextContent('Generate Meals with AI')
-
-      await user.click(generateButton)
-
-      // Should show loading state
-      expect(generateButton).toHaveTextContent('Generating Meals...')
-      expect(generateButton).toBeDisabled()
-
-      // Should make API call to correct endpoint
-      await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalledWith(
-          '/api/plans/plan-123/generate-meals',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ planData: mockPlanData })
-          }
-        )
-      })
-
-      // Should call success callback
-      await waitFor(() => {
-        expect(mockOnGenerationComplete).toHaveBeenCalledWith('job-123')
-        expect(mockOnError).not.toHaveBeenCalled()
-      })
+  describe('Initial Render', () => {
+    it('renders Generate Meals button with correct styling', () => {
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      const button = screen.getByRole('button', { name: /generate meals/i })
+      expect(button).toBeInTheDocument()
+      expect(button).toHaveClass('bg-green-500', 'hover:bg-green-700', 'text-white')
+      expect(button).not.toBeDisabled()
     })
 
-    it('should handle generation completion callback', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ jobId: 'job-456', status: 'pending' })
-      })
-
-      const user = userEvent.setup()
-
-      render(
-        <MockMealGenerationTrigger
-          planId="plan-456"
-          planData={mockPlanData}
-          onGenerationComplete={mockOnGenerationComplete}
-        />
-      )
-
-      await user.click(screen.getByTestId('generate-meals-btn'))
-
-      await waitFor(() => {
-        expect(mockOnGenerationComplete).toHaveBeenCalledWith('job-456')
-      })
-    })
-  })
-
-  describe('Error Handling', () => {
-    it('should handle API errors gracefully', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        json: () => Promise.resolve({ error: 'Authentication required' })
-      })
-
-      const user = userEvent.setup()
-
-      render(
-        <MockMealGenerationTrigger
-          planId="plan-123"
-          planData={mockPlanData}
-          onError={mockOnError}
-        />
-      )
-
-      await user.click(screen.getByTestId('generate-meals-btn'))
-
-      await waitFor(() => {
-        expect(screen.getByTestId('generation-error')).toHaveTextContent(
-          'Failed to start meal generation'
-        )
-      })
-
-      expect(mockOnError).toHaveBeenCalledWith('Failed to start meal generation')
+    it('displays plan name in button text', () => {
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      expect(screen.getByText(/generate meals for test plan/i)).toBeInTheDocument()
     })
 
-    it('should handle network errors', async () => {
-      mockFetch.mockRejectedValueOnce(new Error('Network error'))
-
-      const user = userEvent.setup()
-
-      render(
-        <MockMealGenerationTrigger
-          planId="plan-123"
-          planData={mockPlanData}
-          onError={mockOnError}
-        />
-      )
-
-      await user.click(screen.getByTestId('generate-meals-btn'))
-
-      await waitFor(() => {
-        expect(mockOnError).toHaveBeenCalledWith('Network error')
-      })
-    })
-
-    it('should reset error state on retry', async () => {
-      const user = userEvent.setup()
-
-      // First call fails
-      mockFetch.mockRejectedValueOnce(new Error('Network error'))
-
-      render(
-        <MockMealGenerationTrigger
-          planId="plan-123"
-          planData={mockPlanData}
-        />
-      )
-
-      await user.click(screen.getByTestId('generate-meals-btn'))
-
-      await waitFor(() => {
-        expect(screen.getByTestId('generation-error')).toBeInTheDocument()
-      })
-
-      // Second call succeeds
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ jobId: 'job-retry', status: 'pending' })
-      })
-
-      await user.click(screen.getByTestId('generate-meals-btn'))
-
-      // Error should be cleared
-      await waitFor(() => {
-        expect(screen.queryByTestId('generation-error')).not.toBeInTheDocument()
-      })
-    })
-  })
-
-  describe('Button States', () => {
-    it('should disable button during generation', async () => {
-      // Mock a delayed response
-      mockFetch.mockImplementationOnce(
-        () => new Promise(resolve => 
-          setTimeout(() => resolve({
-            ok: true,
-            json: () => Promise.resolve({ jobId: 'job-123' })
-          }), 100)
-        )
-      )
-
-      const user = userEvent.setup()
-
-      render(
-        <MockMealGenerationTrigger
-          planId="plan-123"
-          planData={mockPlanData}
-        />
-      )
-
-      const button = screen.getByTestId('generate-meals-btn')
-      await user.click(button)
-
-      // Button should be disabled and show loading text
+    it('is disabled when plan has no group meals', () => {
+      const emptyPlan = { ...mockPlan, group_meals: [] }
+      render(<MealGenerationTrigger plan={emptyPlan} onSuccess={jest.fn()} />)
+      
+      const button = screen.getByRole('button', { name: /generate meals/i })
       expect(button).toBeDisabled()
-      expect(button).toHaveTextContent('Generating Meals...')
+      expect(button).toHaveClass('bg-gray-400', 'cursor-not-allowed')
+    })
 
-      // Wait for completion
-      await waitFor(() => {
-        expect(button).not.toBeDisabled()
-        expect(button).toHaveTextContent('Generate Meals with AI')
-      })
+    it('shows tooltip when disabled', () => {
+      const emptyPlan = { ...mockPlan, group_meals: [] }
+      render(<MealGenerationTrigger plan={emptyPlan} onSuccess={jest.fn()} />)
+      
+      expect(screen.getByText(/assign meals to groups first/i)).toBeInTheDocument()
     })
   })
 
-  describe('Component Integration', () => {
-    it('should work with different plan data structures', async () => {
-      const complexPlanData = {
-        name: 'Complex Plan',
-        week_start: '2024-02-01',
-        notes: 'Complex notes with special characters: àáâãäå',
+  describe('Loading State', () => {
+    it('displays loading state correctly during generation', () => {
+      mockUseMealGenerationProgress.mockReturnValue({
+        ...defaultProgressHookReturn,
+        status: 'processing',
+        progress: 30,
+      })
+
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      const button = screen.getByRole('button')
+      expect(button).toBeDisabled()
+      expect(button).toHaveClass('bg-gray-400')
+      expect(screen.getByText(/generating meals.../i)).toBeInTheDocument()
+      
+      // Progress bar should be visible
+      const progressBar = screen.getByRole('progressbar')
+      expect(progressBar).toBeInTheDocument()
+      expect(progressBar).toHaveAttribute('aria-valuenow', '30')
+    })
+
+    it('shows spinner during loading', () => {
+      mockUseMealGenerationProgress.mockReturnValue({
+        ...defaultProgressHookReturn,
+        status: 'processing',
+        progress: 50,
+      })
+
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      // Look for spinning animation class
+      const spinner = screen.getByRole('status')
+      expect(spinner).toBeInTheDocument()
+      expect(spinner).toHaveClass('animate-spin')
+    })
+
+    it('displays current step during generation', () => {
+      mockUseMealGenerationProgress.mockReturnValue({
+        ...defaultProgressHookReturn,
+        status: 'processing',
+        progress: 60,
+        currentStep: 'Generating meals with AI...',
+      })
+
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      expect(screen.getByText('Generating meals with AI...')).toBeInTheDocument()
+    })
+  })
+
+  describe('Error State', () => {
+    it('displays error message when generation fails', () => {
+      mockUseMealGenerationProgress.mockReturnValue({
+        ...defaultProgressHookReturn,
+        status: 'failed',
+        error: 'Failed to generate meals: API error',
+      })
+
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      expect(screen.getByText(/failed to generate meals: api error/i)).toBeInTheDocument()
+      
+      const button = screen.getByRole('button', { name: /try again/i })
+      expect(button).toBeInTheDocument()
+      expect(button).toHaveClass('bg-red-500', 'hover:bg-red-600')
+    })
+
+    it('allows retry after failure', async () => {
+      const mockReset = jest.fn()
+      mockUseMealGenerationProgress.mockReturnValue({
+        ...defaultProgressHookReturn,
+        status: 'failed',
+        error: 'Network error',
+        reset: mockReset,
+      })
+
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      const retryButton = screen.getByRole('button', { name: /try again/i })
+      fireEvent.click(retryButton)
+      
+      expect(mockReset).toHaveBeenCalled()
+    })
+  })
+
+  describe('Success State', () => {
+    it('displays success message when generation completes', () => {
+      mockUseMealGenerationProgress.mockReturnValue({
+        ...defaultProgressHookReturn,
+        status: 'completed',
+        progress: 100,
+        totalMeals: 21,
+      })
+
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      expect(screen.getByText(/21 meals generated successfully!/i)).toBeInTheDocument()
+      expect(screen.getByText(/✓/)).toBeInTheDocument()
+    })
+
+    it('calls onSuccess callback when generation completes', () => {
+      const mockOnSuccess = jest.fn()
+      
+      mockUseMealGenerationProgress.mockReturnValue({
+        ...defaultProgressHookReturn,
+        status: 'completed',
+        progress: 100,
+        totalMeals: 21,
+      })
+
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={mockOnSuccess} />)
+      
+      expect(mockOnSuccess).toHaveBeenCalledWith(mockPlan.id, 21)
+    })
+
+    it('shows generate again button after success', () => {
+      mockUseMealGenerationProgress.mockReturnValue({
+        ...defaultProgressHookReturn,
+        status: 'completed',
+        progress: 100,
+        totalMeals: 21,
+      })
+
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      const generateAgainButton = screen.getByRole('button', { name: /generate again/i })
+      expect(generateAgainButton).toBeInTheDocument()
+      expect(generateAgainButton).toHaveClass('bg-blue-500', 'hover:bg-blue-600')
+    })
+  })
+
+  describe('Button Interactions', () => {
+    it('triggers meal generation when clicked', async () => {
+      mockGenerateMealsForPlan.mockResolvedValue({ jobId: 'job-123' })
+      
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      const button = screen.getByRole('button', { name: /generate meals/i })
+      fireEvent.click(button)
+      
+      await waitFor(() => {
+        expect(mockGenerateMealsForPlan).toHaveBeenCalledWith(mockPlan.id, mockPlan)
+      })
+      
+      expect(defaultProgressHookReturn.startPolling).toHaveBeenCalledWith('job-123')
+    })
+
+    it('handles generation service errors gracefully', async () => {
+      mockGenerateMealsForPlan.mockRejectedValue(new Error('Service unavailable'))
+      
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      const button = screen.getByRole('button', { name: /generate meals/i })
+      fireEvent.click(button)
+      
+      await waitFor(() => {
+        expect(screen.getByText(/failed to start meal generation/i)).toBeInTheDocument()
+      })
+    })
+
+    it('prevents multiple simultaneous generation requests', async () => {
+      mockGenerateMealsForPlan.mockResolvedValue({ jobId: 'job-123' })
+      mockUseMealGenerationProgress.mockReturnValue({
+        ...defaultProgressHookReturn,
+        status: 'processing',
+      })
+      
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      const button = screen.getByRole('button')
+      expect(button).toBeDisabled()
+      
+      fireEvent.click(button)
+      expect(mockGenerateMealsForPlan).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('Progress Tracking', () => {
+    it('initializes progress tracking hook with correct parameters', () => {
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      expect(mockUseMealGenerationProgress).toHaveBeenCalledWith({
+        autoStart: false,
+        onComplete: expect.any(Function),
+        onError: expect.any(Function),
+      })
+    })
+
+    it('stops polling when component unmounts', () => {
+      const { unmount } = render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      unmount()
+      
+      expect(defaultProgressHookReturn.stopPolling).toHaveBeenCalled()
+    })
+  })
+
+  describe('Accessibility', () => {
+    it('has proper ARIA labels', () => {
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      const button = screen.getByRole('button', { name: /generate meals for test plan/i })
+      expect(button).toHaveAttribute('aria-describedby')
+    })
+
+    it('progress bar has correct ARIA attributes', () => {
+      mockUseMealGenerationProgress.mockReturnValue({
+        ...defaultProgressHookReturn,
+        status: 'processing',
+        progress: 45,
+      })
+
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      const progressBar = screen.getByRole('progressbar')
+      expect(progressBar).toHaveAttribute('aria-valuenow', '45')
+      expect(progressBar).toHaveAttribute('aria-valuemin', '0')
+      expect(progressBar).toHaveAttribute('aria-valuemax', '100')
+    })
+
+    it('provides screen reader feedback for status changes', () => {
+      mockUseMealGenerationProgress.mockReturnValue({
+        ...defaultProgressHookReturn,
+        status: 'processing',
+        progress: 75,
+      })
+
+      render(<MealGenerationTrigger plan={mockPlan} onSuccess={jest.fn()} />)
+      
+      const statusRegion = screen.getByRole('status')
+      expect(statusRegion).toBeInTheDocument()
+      expect(statusRegion).toHaveAttribute('aria-live', 'polite')
+    })
+  })
+
+  describe('Edge Cases', () => {
+    it('handles undefined plan gracefully', () => {
+      render(<MealGenerationTrigger plan={undefined as any} onSuccess={jest.fn()} />)
+      
+      const button = screen.getByRole('button')
+      expect(button).toBeDisabled()
+      expect(screen.getByText(/no plan selected/i)).toBeInTheDocument()
+    })
+
+    it('handles plan with invalid group_meals structure', () => {
+      const invalidPlan = { ...mockPlan, group_meals: null as any }
+      render(<MealGenerationTrigger plan={invalidPlan} onSuccess={jest.fn()} />)
+      
+      const button = screen.getByRole('button')
+      expect(button).toBeDisabled()
+    })
+
+    it('displays appropriate message for plans with zero total meals', () => {
+      const zeroPlan = {
+        ...mockPlan,
         group_meals: [
-          { group_id: 'group-1', meal_count: 7 },
-          { group_id: 'group-2', meal_count: 14 }
+          { group_id: 'group-1', meal_count: 0, notes: '' }
         ]
       }
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ jobId: 'job-complex' })
-      })
-
-      const user = userEvent.setup()
-
-      render(
-        <MockMealGenerationTrigger
-          planId="plan-complex"
-          planData={complexPlanData}
-          onGenerationComplete={mockOnGenerationComplete}
-        />
-      )
-
-      await user.click(screen.getByTestId('generate-meals-btn'))
-
-      await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalledWith(
-          '/api/plans/plan-complex/generate-meals',
-          expect.objectContaining({
-            body: JSON.stringify({ planData: complexPlanData })
-          })
-        )
-      })
-    })
-
-    it('should handle missing callback functions gracefully', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ jobId: 'job-no-callback' })
-      })
-
-      const user = userEvent.setup()
-
-      // Render without callbacks
-      render(
-        <MockMealGenerationTrigger
-          planId="plan-123"
-          planData={mockPlanData}
-        />
-      )
-
-      await user.click(screen.getByTestId('generate-meals-btn'))
-
-      // Should not throw errors
-      await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalled()
-      })
+      render(<MealGenerationTrigger plan={zeroPlan} onSuccess={jest.fn()} />)
+      
+      expect(screen.getByText(/no meals requested/i)).toBeInTheDocument()
     })
   })
 })
