@@ -376,8 +376,6 @@ function PlansTab() {
 
       if (error) throw error
       
-      console.log('Loaded plans:', plans) // Debug log
-      console.log('Available groups when loading plans:', availableGroups) // Debug log
       setPlans(plans || [])
       setError(null)
     } catch (error) {
