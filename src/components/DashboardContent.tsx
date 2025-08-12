@@ -1,17 +1,19 @@
 'use client'
 
-import { useMockAuth } from './MockAuthProvider'
-import { useState, useEffect } from 'react'
-import MockAuthButton from './MockAuthButton'
+import { useAuth } from './AuthProvider'
+import { useState, useEffect, useMemo } from 'react'
 import GroupForm from './GroupForm'
 import PlanForm from './PlanForm'
 import { GroupData } from '@/lib/groupValidation'
 import { PlanData } from '@/lib/planValidation'
-import { getStoredGroups, storeGroup, removeStoredGroup, StoredGroup, getStoredPlans, storePlan, removeStoredPlan, StoredPlan } from '@/lib/mockStorage'
+import { getSupabaseClient } from '@/lib/supabase/singleton'
 
 export default function DashboardContent() {
-  const { user } = useMockAuth()
+  const { user, signOut } = useAuth()
   const [activeTab, setActiveTab] = useState<'groups' | 'plans'>('groups')
+  
+  // Use singleton client to prevent per-render creation
+  const supabase = useMemo(() => getSupabaseClient(), [])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -21,9 +23,14 @@ export default function DashboardContent() {
           <div className="flex justify-between items-center py-6">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Meal Planner Dashboard</h1>
-              <p className="text-gray-700">Welcome back, {user?.name || user?.email}</p>
+              <p className="text-gray-700">Welcome back, {user?.user_metadata?.full_name || user?.email}</p>
             </div>
-            <MockAuthButton />
+            <button
+              onClick={signOut}
+              className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+            >
+              Sign Out
+            </button>
           </div>
         </div>
       </header>
@@ -66,21 +73,35 @@ export default function DashboardContent() {
 }
 
 function GroupsTab() {
-  const [groups, setGroups] = useState<StoredGroup[]>([])
+  const { user } = useAuth()
+  const [groups, setGroups] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateForm, setShowCreateForm] = useState(false)
-  const [editingGroup, setEditingGroup] = useState<StoredGroup | null>(null)
+  const [editingGroup, setEditingGroup] = useState<any | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadGroups()
-  }, [])
+  // Use singleton client to prevent per-render creation
+  const supabase = useMemo(() => getSupabaseClient(), [])
 
-  const loadGroups = () => {
+  useEffect(() => {
+    if (user) {
+      loadGroups()
+    }
+  }, [user])
+
+  const loadGroups = async () => {
     try {
       setLoading(true)
-      const storedGroups = getStoredGroups()
-      setGroups(storedGroups)
+      const { data: groups, error } = await supabase
+        .from('groups')
+        .select('*')
+        .eq('user_id', user?.id)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      
+      setGroups(groups || [])
       setError(null)
     } catch (error) {
       console.error('Error loading groups:', error)
@@ -92,16 +113,28 @@ function GroupsTab() {
 
   const handleCreateGroup = async (data: GroupData) => {
     try {
-      const newGroup: StoredGroup = {
-        id: `group-${Date.now()}`,
-        ...data,
-        user_id: 'mock-user-123',
-        status: 'active',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+      const insertData = {
+        name: data.name,
+        adults: data.adults,
+        teens: data.teens,
+        kids: data.kids,
+        toddlers: data.toddlers,
+        dietary_restrictions: data.dietary_restrictions,
+        user_id: user?.id,
+        status: 'active'
       }
       
-      storeGroup(newGroup)
+      const { data: newGroup, error } = await supabase
+        .from('groups')
+        .insert(insertData)
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Failed to create group:', error.message)
+        throw error
+      }
+
       setGroups([newGroup, ...groups])
       setShowCreateForm(false)
       setError(null)
@@ -113,13 +146,22 @@ function GroupsTab() {
 
   const handleEditGroup = async (data: GroupData) => {
     try {
-      const updatedGroup: StoredGroup = {
-        ...editingGroup!,
-        ...data,
-        updated_at: new Date().toISOString()
-      }
-      
-      storeGroup(updatedGroup)
+      const { data: updatedGroup, error } = await supabase
+        .from('groups')
+        .update({
+          name: data.name,
+          adults: data.adults,
+          teens: data.teens,
+          kids: data.kids,
+          toddlers: data.toddlers,
+          dietary_restrictions: data.dietary_restrictions
+        })
+        .eq('id', editingGroup!.id)
+        .select()
+        .single()
+
+      if (error) throw error
+
       setGroups(groups.map(g => g.id === editingGroup!.id ? updatedGroup : g))
       setEditingGroup(null)
       setError(null)
@@ -141,7 +183,13 @@ function GroupsTab() {
     }
 
     try {
-      removeStoredGroup(groupId)
+      const { error } = await supabase
+        .from('groups')
+        .update({ status: 'deleted' })
+        .eq('id', groupId)
+
+      if (error) throw error
+
       setGroups(groups.filter(g => g.id !== groupId))
       setError(null)
     } catch (error) {
@@ -297,23 +345,37 @@ function GroupsTab() {
 }
 
 function PlansTab() {
-  const [plans, setPlans] = useState<StoredPlan[]>([])
-  const [availableGroups, setAvailableGroups] = useState<StoredGroup[]>([])
+  const { user } = useAuth()
+  const [plans, setPlans] = useState<any[]>([])
+  const [availableGroups, setAvailableGroups] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateForm, setShowCreateForm] = useState(false)
-  const [editingPlan, setEditingPlan] = useState<StoredPlan | null>(null)
+  const [editingPlan, setEditingPlan] = useState<any | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadPlans()
-    loadGroups()
-  }, [])
+  // Use singleton client to prevent per-render creation
+  const supabase = useMemo(() => getSupabaseClient(), [])
 
-  const loadPlans = () => {
+  useEffect(() => {
+    if (user) {
+      loadPlans()
+      loadGroups()
+    }
+  }, [user])
+
+  const loadPlans = async () => {
     try {
       setLoading(true)
-      const storedPlans = getStoredPlans()
-      setPlans(storedPlans)
+      const { data: plans, error } = await supabase
+        .from('meal_plans')
+        .select('*')
+        .eq('user_id', user?.id)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      
+      setPlans(plans || [])
       setError(null)
     } catch (error) {
       console.error('Error loading plans:', error)
@@ -323,10 +385,18 @@ function PlansTab() {
     }
   }
 
-  const loadGroups = () => {
+  const loadGroups = async () => {
     try {
-      const storedGroups = getStoredGroups()
-      setAvailableGroups(storedGroups)
+      const { data: groups, error } = await supabase
+        .from('groups')
+        .select('*')
+        .eq('user_id', user?.id)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      
+      setAvailableGroups(groups || [])
     } catch (error) {
       console.error('Error loading groups:', error)
     }
@@ -334,16 +404,21 @@ function PlansTab() {
 
   const handleCreatePlan = async (data: PlanData, planId?: string) => {
     try {
-      const newPlan: StoredPlan = {
-        id: planId || `plan-${Date.now()}`,
-        ...data,
-        user_id: 'mock-user-123',
-        status: 'active',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }
-      
-      storePlan(newPlan)
+      const { data: newPlan, error } = await supabase
+        .from('meal_plans')
+        .insert({
+          name: data.name,
+          week_start: data.week_start,
+          notes: data.notes || null,
+          group_meals: data.group_meals || [],
+          user_id: user?.id,
+          status: 'active'
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+
       setPlans([newPlan, ...plans])
       setShowCreateForm(false)
       setError(null)
@@ -355,13 +430,20 @@ function PlansTab() {
 
   const handleEditPlan = async (data: PlanData, planId?: string) => {
     try {
-      const updatedPlan: StoredPlan = {
-        ...editingPlan!,
-        ...data,
-        updated_at: new Date().toISOString()
-      }
-      
-      storePlan(updatedPlan)
+      const { data: updatedPlan, error } = await supabase
+        .from('meal_plans')
+        .update({
+          name: data.name,
+          week_start: data.week_start,
+          notes: data.notes || null,
+          group_meals: data.group_meals || []
+        })
+        .eq('id', editingPlan!.id)
+        .select()
+        .single()
+
+      if (error) throw error
+
       setPlans(plans.map(p => p.id === editingPlan!.id ? updatedPlan : p))
       setEditingPlan(null)
       setError(null)
@@ -377,7 +459,13 @@ function PlansTab() {
     }
 
     try {
-      removeStoredPlan(planId)
+      const { error } = await supabase
+        .from('meal_plans')
+        .update({ status: 'deleted' })
+        .eq('id', planId)
+
+      if (error) throw error
+
       setPlans(plans.filter(p => p.id !== planId))
       setError(null)
     } catch (error) {
@@ -392,20 +480,31 @@ function PlansTab() {
     setError(null)
   }
 
-  const getGroupMealsSummary = (groupMeals: StoredPlan['group_meals']) => {
-    const groupDetails = groupMeals.map(gm => {
-      const group = availableGroups.find(g => g.id === gm.group_id)
+  const getGroupMealsSummary = (plan: any) => {
+    if (!plan.group_meals || plan.group_meals.length === 0) {
+      // Fallback for plans without group_meals data
+      return []
+    }
+
+    // Map the stored group_meals to display format
+    return plan.group_meals.map((groupMeal: any) => {
+      const group = availableGroups.find(g => g.id === groupMeal.group_id)
       return {
-        name: group?.name || 'Unknown Group',
-        mealCount: gm.meal_count,
-        notes: gm.notes
+        name: group?.name || `Group ${groupMeal.group_id}`,
+        mealCount: groupMeal.meal_count,
+        notes: groupMeal.notes || ''
       }
     })
-    return groupDetails
   }
 
-  const getTotalMealCount = (groupMeals: StoredPlan['group_meals']) => {
-    return groupMeals.reduce((total, gm) => total + gm.meal_count, 0)
+  const getTotalMealCount = (plan: any) => {
+    if (!plan.group_meals || plan.group_meals.length === 0) {
+      return 0
+    }
+    
+    return plan.group_meals.reduce((total: number, groupMeal: any) => {
+      return total + (groupMeal.meal_count || 0)
+    }, 0)
   }
 
   const formatDate = (dateString: string) => {
@@ -545,8 +644,8 @@ function PlansTab() {
         <div className="bg-white shadow overflow-hidden sm:rounded-md">
           <ul className="divide-y divide-gray-200">
             {plans.map((plan) => {
-              const groupMealsSummary = getGroupMealsSummary(plan.group_meals)
-              const totalMeals = getTotalMealCount(plan.group_meals)
+              const groupMealsSummary = getGroupMealsSummary(plan)
+              const totalMeals = getTotalMealCount(plan)
               
               return (
                 <li key={plan.id} className="px-4 py-4 sm:px-6">
@@ -575,25 +674,33 @@ function PlansTab() {
                       {/* Group Meal Assignments */}
                       <div className="mt-3 space-y-2">
                         <p className="text-sm font-medium text-gray-900">Meal Assignments:</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {groupMealsSummary.map((groupDetail, index) => (
-                            <div key={index} className="bg-gray-50 rounded-md p-3">
-                              <div className="flex items-center justify-between">
-                                <span className="text-sm font-medium text-gray-900">
-                                  {groupDetail.name}
-                                </span>
-                                <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-md">
-                                  {groupDetail.mealCount} meals
-                                </span>
+                        {groupMealsSummary.length === 0 ? (
+                          <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                            <p className="text-sm text-yellow-800">
+                              No meal assignments yet. Edit this plan to assign meals to groups.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {groupMealsSummary.map((groupDetail, index) => (
+                              <div key={index} className="bg-gray-50 rounded-md p-3">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-sm font-medium text-gray-900">
+                                    {groupDetail.name}
+                                  </span>
+                                  <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-md">
+                                    {groupDetail.mealCount} meals
+                                  </span>
+                                </div>
+                                {groupDetail.notes && (
+                                  <p className="mt-1 text-xs text-gray-600">
+                                    {groupDetail.notes}
+                                  </p>
+                                )}
                               </div>
-                              {groupDetail.notes && (
-                                <p className="mt-1 text-xs text-gray-600">
-                                  {groupDetail.notes}
-                                </p>
-                              )}
-                            </div>
-                          ))}
-                        </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       
                       {plan.notes && (

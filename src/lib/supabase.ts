@@ -26,5 +26,4 @@ export const createServerClient = () => {
   })
 }
 
-// Alias for test compatibility
-export { createServerClient as createClient }
+// Use createServerClient for server-side operations, supabase for client-side

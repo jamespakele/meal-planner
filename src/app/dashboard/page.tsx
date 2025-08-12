@@ -1,10 +1,10 @@
-import MockProtectedRoute from '@/components/MockProtectedRoute'
+import ProtectedRoute from '@/components/ProtectedRoute'
 import DashboardContent from '@/components/DashboardContent'
 
 export default function Dashboard() {
   return (
-    <MockProtectedRoute>
+    <ProtectedRoute>
       <DashboardContent />
-    </MockProtectedRoute>
+    </ProtectedRoute>
   )
 }

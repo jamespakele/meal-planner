@@ -1,7 +1,9 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
-import { MockAuthProvider } from '@/components/MockAuthProvider'
+import { AuthProvider } from '@/components/AuthProvider'
+import ErrorBoundary from '@/components/ErrorBoundary'
+import SupabaseMonitorDashboard from '@/components/SupabaseMonitorDashboard'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -18,7 +20,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.className} bg-white text-gray-900`}>
-        <MockAuthProvider>{children}</MockAuthProvider>
+        <ErrorBoundary>
+          <AuthProvider>{children}</AuthProvider>
+          <SupabaseMonitorDashboard refreshInterval={3000} compact={true} />
+        </ErrorBoundary>
       </body>
     </html>
   )

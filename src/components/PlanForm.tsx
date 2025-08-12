@@ -3,13 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import { PlanData, validatePlan, sanitizePlanName, GroupMealAssignment } from '@/lib/planValidation'
 import { getStoredGroups, StoredGroup } from '@/lib/mockStorage'
-import { 
-  validatePlanForGeneration, 
-  generateAndStoreMealsForPlan,
-  planHasGeneratedMeals 
-} from '@/lib/mealGenerationWorkflow'
-import MealGenerationProgress, { useMealGenerationProgress } from './MealGenerationProgress'
-import MealSelectionView from './MealSelectionView'
+// Removed meal generation imports - now handled separately
 
 interface PlanFormProps {
   onSubmit: (data: PlanData, planId?: string) => void | Promise<void>
@@ -30,21 +24,17 @@ export default function PlanForm({ onSubmit, onCancel, initialData, enableMealGe
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [availableGroups, setAvailableGroups] = useState<StoredGroup[]>([])
   
-  // Meal generation states
-  const [currentStep, setCurrentStep] = useState<'plan' | 'generate' | 'select'>('plan')
-  const [generatedPlanId, setGeneratedPlanId] = useState<string>()
-  const [selectedMealCount, setSelectedMealCount] = useState(0)
-  
-  const generationProgress = useMealGenerationProgress()
+  // Removed meal generation state - now handled separately
   
   const isEditing = Boolean(initialData)
-  const canGenerateMeals = enableMealGeneration && !isEditing
 
   useEffect(() => {
     // Load available groups
     const groups = getStoredGroups()
     setAvailableGroups(groups)
   }, [])
+
+  // Removed debug request useEffect - meal generation handled separately
 
   const handleInputChange = (field: keyof PlanData, value: any) => {
     setFormData(prev => ({
@@ -104,89 +94,12 @@ export default function PlanForm({ onSubmit, onCancel, initialData, enableMealGe
     return formData.group_meals.reduce((sum, gm) => sum + gm.meal_count, 0)
   }
 
-  const handleGenerateMeals = async () => {
-    const sanitizedData = {
-      ...formData,
-      name: sanitizePlanName(formData.name)
-    }
-    
-    // Validate plan first
-    const validation = validatePlan(sanitizedData)
-    if (!validation.isValid) {
-      setErrors(validation.errors)
-      return
-    }
-    
-    // Validate for meal generation
-    const generationValidation = validatePlanForGeneration(sanitizedData)
-    if (!generationValidation.isValid) {
-      setErrors({ general: generationValidation.errors })
-      return
-    }
-    
-    try {
-      setCurrentStep('generate')
-      generationProgress.reset()
-      generationProgress.startValidation()
-      
-      const groupCount = sanitizedData.group_meals.length
-      generationProgress.startGeneration(groupCount)
-      
-      const result = await generateAndStoreMealsForPlan(sanitizedData, 'current-user')
-      
-      if (result.success && result.planId) {
-        generationProgress.startProcessing()
-        setGeneratedPlanId(result.planId)
-        
-        // Brief delay for processing animation
-        setTimeout(() => {
-          generationProgress.complete()
-          setCurrentStep('select')
-        }, 1000)
-      } else {
-        generationProgress.setError(result.error || 'Failed to generate meals')
-      }
-    } catch (error) {
-      generationProgress.setError(
-        error instanceof Error ? error.message : 'An unexpected error occurred'
-      )
-    }
-  }
-
-  const handleMealSelectionComplete = async () => {
-    if (generatedPlanId) {
-      const sanitizedData = {
-        ...formData,
-        name: sanitizePlanName(formData.name)
-      }
-      
-      setIsSubmitting(true)
-      try {
-        await onSubmit(sanitizedData, generatedPlanId)
-      } catch (error) {
-        console.error('Error completing plan:', error)
-        setErrors({ general: ['Failed to complete plan creation'] })
-      } finally {
-        setIsSubmitting(false)
-      }
-    }
-  }
-
-  const handleRetryGeneration = () => {
-    generationProgress.reset()
-    setCurrentStep('plan')
-    setGeneratedPlanId(undefined)
-    setSelectedMealCount(0)
-  }
+  // Removed meal generation functions - now handled separately
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (canGenerateMeals) {
-      handleGenerateMeals()
-      return
-    }
-    
+    // Always submit the plan first - meal generation is now separate
     const sanitizedData = {
       ...formData,
       name: sanitizePlanName(formData.name)
@@ -212,84 +125,7 @@ export default function PlanForm({ onSubmit, onCancel, initialData, enableMealGe
 
   const noGroupsAvailable = availableGroups.length === 0
 
-  // Step 2: Meal Generation Progress
-  if (currentStep === 'generate') {
-    return (
-      <div className="space-y-6 max-w-2xl">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">
-            Generating Your Meals
-          </h2>
-          <p className="text-gray-600">
-            AI is creating personalized meal suggestions for your plan &ldquo;{formData.name}&rdquo;
-          </p>
-        </div>
-
-        <MealGenerationProgress
-          status={generationProgress.status}
-          progress={generationProgress.progress}
-          currentStep={generationProgress.currentStep}
-          totalGroups={generationProgress.totalGroups}
-          processedGroups={generationProgress.processedGroups}
-          error={generationProgress.error}
-          onRetry={handleRetryGeneration}
-          onCancel={() => setCurrentStep('plan')}
-        />
-      </div>
-    )
-  }
-
-  // Step 3: Meal Selection
-  if (currentStep === 'select' && generatedPlanId) {
-    return (
-      <div className="space-y-6 max-w-6xl">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">
-              Select Your Meals
-            </h2>
-            <p className="text-gray-600">
-              Choose from AI-generated meal options for &ldquo;{formData.name}&rdquo;
-            </p>
-          </div>
-          
-          <div className="flex space-x-3">
-            <button
-              onClick={handleRetryGeneration}
-              className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded-md font-medium"
-            >
-              Back to Plan
-            </button>
-            
-            {selectedMealCount > 0 && (
-              <button
-                onClick={handleMealSelectionComplete}
-                disabled={isSubmitting}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium disabled:bg-gray-400"
-              >
-                {isSubmitting ? 'Creating Plan...' : `Create Plan with ${selectedMealCount} Meals`}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {errors.general && (
-          <div className="bg-red-50 p-4 rounded-md">
-            <p className="text-sm text-red-600">{errors.general[0]}</p>
-          </div>
-        )}
-
-        <MealSelectionView
-          planId={generatedPlanId}
-          onSelectionChange={setSelectedMealCount}
-          onComplete={handleMealSelectionComplete}
-          compact={false}
-        />
-      </div>
-    )
-  }
-
-  // Step 1: Plan Creation Form
+  // Plan Creation Form (meal generation is now handled separately)
   return (
     <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
       <div>
@@ -491,9 +327,7 @@ export default function PlanForm({ onSubmit, onCancel, initialData, enableMealGe
             ? (isEditing ? 'Updating...' : 'Creating...') 
             : isEditing 
               ? 'Update Plan'
-              : canGenerateMeals 
-                ? '🤖 Generate Meals with AI'
-                : 'Create Plan'
+              : 'Create Plan'
           }
         </button>
         

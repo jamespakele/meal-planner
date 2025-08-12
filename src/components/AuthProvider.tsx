@@ -1,8 +1,8 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react'
 import { User, Session } from '@supabase/supabase-js'
-import { supabase } from '@/lib/supabase'
+import { getSupabaseClient } from '@/lib/supabase/singleton'
 
 interface AuthContextType {
   user: User | null
@@ -30,12 +30,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [mounted, setMounted] = useState(false)
+  
+  // Use singleton client to prevent per-render creation
+  const supabase = useMemo(() => getSupabaseClient(), [])
 
   useEffect(() => {
+    setMounted(true)
+    
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setUser(session?.user ?? null)
+      setLoading(false)
+    }).catch(() => {
+      // Handle session fetch errors gracefully
       setLoading(false)
     })
 
@@ -49,39 +58,60 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     )
 
     return () => subscription.unsubscribe()
-  }, [])
+  }, [supabase.auth])
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = useCallback(async () => {
     setLoading(true)
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    })
-    
-    if (error) {
-      console.error('Error signing in:', error.message)
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      })
+      
+      if (error) {
+        console.error('Error signing in:', error.message)
+        setLoading(false)
+      }
+    } catch (error) {
+      console.error('Unexpected error during sign in:', error)
       setLoading(false)
     }
-  }
+  }, [supabase.auth])
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     setLoading(true)
-    const { error } = await supabase.auth.signOut()
-    if (error) {
-      console.error('Error signing out:', error.message)
+    try {
+      const { error } = await supabase.auth.signOut()
+      if (error) {
+        console.error('Error signing out:', error.message)
+      }
+      setLoading(false)
+    } catch (error) {
+      console.error('Unexpected error during sign out:', error)
+      setLoading(false)
     }
-    setLoading(false)
-  }
+  }, [supabase.auth])
 
-  const value = {
-    user,
-    session,
-    loading,
-    signInWithGoogle,
-    signOut,
-  }
+  const value = useMemo(
+    () => ({
+      user,
+      session,
+      loading,
+      signInWithGoogle,
+      signOut,
+    }),
+    [user, session, loading, signInWithGoogle, signOut]
+  )
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  // Prevent hydration mismatch by showing loading state until mounted
+  // Move conditional rendering to content, not return path
+  const content = !mounted ? (
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
+    </div>
+  ) : children
+
+  return <AuthContext.Provider value={value}>{content}</AuthContext.Provider>
 }

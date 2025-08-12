@@ -82,6 +82,20 @@ export interface ChatGPTMealRequest {
   adult_equivalent: number
 }
 
+export interface CombinedChatGPTMealRequest {
+  plan_name: string
+  week_start: string
+  groups: Array<{
+    group_name: string
+    demographics: Demographics
+    dietary_restrictions: string[]
+    meals_to_generate: number
+    group_notes?: string
+    adult_equivalent: number
+  }>
+  additional_notes?: string
+}
+
 export interface ChatGPTMealResponse {
   meals: Array<{
     title: string
@@ -99,6 +113,29 @@ export interface ChatGPTMealResponse {
     tags: string[]
     dietary_info: string[]
     difficulty: string
+  }>
+}
+
+export interface CombinedChatGPTMealResponse {
+  groups: Array<{
+    group_name: string
+    meals: Array<{
+      title: string
+      description: string
+      prep_time: number
+      cook_time: number
+      servings: number
+      ingredients: Array<{
+        name: string
+        amount: number
+        unit: string
+        category: string
+      }>
+      instructions: string[]
+      tags: string[]
+      dietary_info: string[]
+      difficulty: string
+    }>
   }>
 }
 
@@ -198,57 +235,78 @@ export async function generateMealsForPlan(
       }
     }
 
-    // Generate meals for each group
-    for (const context of groupContexts) {
-      const mealsToGenerate = context.meal_count_requested + MEAL_GENERATION_CONFIG.DEFAULT_EXTRA_MEALS
-      
-      // Check limits
-      if (mealsToGenerate > MEAL_GENERATION_CONFIG.MAX_MEALS_PER_GROUP) {
-        errors.push({
-          code: 'MEAL_LIMIT_EXCEEDED',
-          message: `Cannot generate ${mealsToGenerate} meals for ${context.group_name}. Maximum is ${MEAL_GENERATION_CONFIG.MAX_MEALS_PER_GROUP}`,
-          group_id: context.group_id
-        })
-        continue
+    // Use combined approach - single API call for all groups
+    const combinedRequest: CombinedChatGPTMealRequest = {
+      plan_name: planData.name,
+      week_start: planData.week_start,
+      additional_notes: planData.notes,
+      groups: groupContexts.map(context => {
+        const mealsToGenerate = context.meal_count_requested + MEAL_GENERATION_CONFIG.DEFAULT_EXTRA_MEALS
+        
+        // Check limits per group
+        if (mealsToGenerate > MEAL_GENERATION_CONFIG.MAX_MEALS_PER_GROUP) {
+          errors.push({
+            code: 'MEAL_LIMIT_EXCEEDED',
+            message: `Cannot generate ${mealsToGenerate} meals for ${context.group_name}. Maximum is ${MEAL_GENERATION_CONFIG.MAX_MEALS_PER_GROUP}`,
+            group_id: context.group_id
+          })
+        }
+
+        return {
+          group_name: context.group_name,
+          demographics: context.demographics,
+          dietary_restrictions: context.dietary_restrictions,
+          meals_to_generate: mealsToGenerate,
+          group_notes: context.group_notes,
+          adult_equivalent: context.adult_equivalent
+        }
+      })
+    }
+
+    // Filter out groups that exceeded limits
+    const validGroups = combinedRequest.groups.filter(group => {
+      const mealsToGenerate = group.meals_to_generate
+      return mealsToGenerate <= MEAL_GENERATION_CONFIG.MAX_MEALS_PER_GROUP
+    })
+
+    if (validGroups.length === 0) {
+      return {
+        success: false,
+        errors
       }
+    }
 
-      // Prepare ChatGPT request
-      const chatGPTRequest: ChatGPTMealRequest = {
-        group_name: context.group_name,
-        demographics: context.demographics,
-        dietary_restrictions: context.dietary_restrictions,
-        meals_to_generate: mealsToGenerate,
-        group_notes: context.group_notes,
-        week_start: planData.week_start,
-        adult_equivalent: context.adult_equivalent
-      }
+    combinedRequest.groups = validGroups
 
-      let retryCount = 0
-      let groupMeals: GeneratedMeal[] = []
+    let retryCount = 0
+    let allGroupMeals: Record<string, GeneratedMeal[]> = {}
 
-      // Retry logic for API calls
-      while (retryCount < MEAL_GENERATION_CONFIG.MAX_RETRIES && groupMeals.length === 0) {
-        try {
-          groupMeals = await generateMealsWithChatGPT(chatGPTRequest)
-          totalApiCalls++
-        } catch (error) {
-          retryCount++
-          console.warn(`Meal generation attempt ${retryCount} failed for ${context.group_name}:`, error)
-          
-          if (retryCount >= MEAL_GENERATION_CONFIG.MAX_RETRIES) {
-            errors.push({
-              code: 'API_FAILURE',
-              message: `Failed to generate meals after ${MEAL_GENERATION_CONFIG.MAX_RETRIES} attempts`,
-              group_id: context.group_id,
-              details: error instanceof Error ? error.message : 'Unknown error'
-            })
-          } else {
-            // Wait before retry (exponential backoff)
-            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount - 1)))
-          }
+    // Retry logic for the combined API call
+    while (retryCount < MEAL_GENERATION_CONFIG.MAX_RETRIES && Object.keys(allGroupMeals).length === 0) {
+      try {
+        allGroupMeals = await generateMealsWithCombinedChatGPT(combinedRequest)
+        totalApiCalls++
+      } catch (error) {
+        retryCount++
+        console.warn(`Combined meal generation attempt ${retryCount} failed:`, error)
+        
+        if (retryCount >= MEAL_GENERATION_CONFIG.MAX_RETRIES) {
+          errors.push({
+            code: 'API_FAILURE',
+            message: `Failed to generate meals after ${MEAL_GENERATION_CONFIG.MAX_RETRIES} attempts`,
+            details: error instanceof Error ? error.message : 'Unknown error'
+          })
+        } else {
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount - 1)))
         }
       }
+    }
 
+    // Process results for each group
+    for (const context of groupContexts) {
+      const groupMeals = allGroupMeals[context.group_name] || []
+      
       if (groupMeals.length > 0) {
         // Calculate total servings needed (base servings * adult equivalent scaling factor)
         const scalingFactor = context.adult_equivalent / 4 // Assuming base recipes serve 4
@@ -487,6 +545,202 @@ Return ONLY valid JSON in this exact format:
 }
 
 /**
+ * Combined ChatGPT API integration - single call for multiple groups
+ */
+export async function generateMealsWithCombinedChatGPT(
+  request: CombinedChatGPTMealRequest
+): Promise<Record<string, GeneratedMeal[]>> {
+  const { plan_name, week_start, groups, additional_notes } = request
+
+  // Build the combined prompt
+  let prompt = `Generate meal options for meal plan "${plan_name}" starting week of ${week_start}.\n\n`
+
+  if (additional_notes) {
+    prompt += `PLAN NOTES: ${additional_notes}\n\n`
+  }
+
+  prompt += `GROUPS TO GENERATE FOR:\n`
+
+  groups.forEach((group, index) => {
+    const { group_name, demographics, dietary_restrictions, meals_to_generate, group_notes, adult_equivalent } = group
+
+    // Build dietary restrictions context
+    const dietaryContext = dietary_restrictions.length > 0
+      ? dietary_restrictions.map(restriction => 
+          DIETARY_RESTRICTION_PROMPTS[restriction as keyof typeof DIETARY_RESTRICTION_PROMPTS] || restriction
+        ).join(' ')
+      : 'No specific dietary restrictions.'
+
+    // Build demographics context
+    const demoContext = `${demographics.adults} adults, ${demographics.teens} teens, ${demographics.kids} kids, ${demographics.toddlers} toddlers (${adult_equivalent} adult equivalents)`
+
+    prompt += `
+${index + 1}. GROUP: "${group_name}"
+   - Demographics: ${demoContext}
+   - Dietary Requirements: ${dietaryContext}
+   - Meals needed: ${meals_to_generate}
+   - Group notes: ${group_notes || 'None specified'}
+   - Scale ingredients for ${adult_equivalent} adult equivalent servings
+`
+  })
+
+  prompt += `
+REQUIREMENTS:
+- Generate meals for ALL groups listed above
+- Each meal must include title, description, prep_time (minutes), cook_time (minutes), servings (base servings before scaling), ingredients with amounts/units/categories, step-by-step instructions, tags, dietary_info, and difficulty level (easy/medium/hard)
+- Ingredients must be categorized: ${INGREDIENT_CATEGORIES.join(', ')}
+- Base servings should be 4-6 people, ingredients will be scaled later
+- Variety in cuisine types and cooking methods
+- Family-friendly options when kids/toddlers are present
+- Respect each group's dietary restrictions
+
+Return ONLY valid JSON in this exact format:
+{
+  "groups": [`
+
+  groups.forEach((group, index) => {
+    prompt += `${index > 0 ? ',' : ''}
+    {
+      "group_name": "${group.group_name}",
+      "meals": [
+        {
+          "title": "Meal Name",
+          "description": "Brief description",
+          "prep_time": 15,
+          "cook_time": 25,
+          "servings": 4,
+          "ingredients": [
+            {
+              "name": "ingredient name",
+              "amount": 1.5,
+              "unit": "lbs",
+              "category": "protein"
+            }
+          ],
+          "instructions": ["Step 1", "Step 2"],
+          "tags": ["quick", "family-friendly"],
+          "dietary_info": ["vegetarian"],
+          "difficulty": "easy"
+        }
+      ]
+    }`
+  })
+
+  prompt += `
+  ]
+}`
+
+  try {
+    // Development mode: Use mock data instead of actual API call
+    if (process.env.NODE_ENV === 'development' && !process.env.OPENAI_API_KEY) {
+      return generateMockMealsForCombinedRequest(request)
+    }
+
+    // Make API call to OpenAI
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY || process.env.OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a professional meal planning assistant. Generate meal suggestions that are practical, nutritious, and appropriate for the specified demographics and dietary restrictions. Return ONLY valid JSON.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        max_tokens: 6000, // Increased for multiple groups
+        temperature: 0.7
+      }),
+      signal: AbortSignal.timeout(MEAL_GENERATION_CONFIG.TIMEOUT_MS)
+    })
+
+    if (!response.ok) {
+      throw new Error(`ChatGPT API error: ${response.status} ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    const content = data.choices?.[0]?.message?.content
+
+    if (!content) {
+      throw new Error('No content received from ChatGPT API')
+    }
+
+    // Parse the JSON response
+    let parsedResponse: CombinedChatGPTMealResponse
+    try {
+      parsedResponse = JSON.parse(content)
+    } catch (parseError) {
+      throw new Error(`Failed to parse ChatGPT response as JSON: ${parseError}`)
+    }
+
+    if (!parsedResponse.groups || !Array.isArray(parsedResponse.groups)) {
+      throw new Error('ChatGPT response missing groups array')
+    }
+
+    // Convert to grouped meals
+    const groupedMeals: Record<string, GeneratedMeal[]> = {}
+
+    parsedResponse.groups.forEach(group => {
+      const groupMeals: GeneratedMeal[] = group.meals.map((meal, index) => ({
+        id: `meal-${Date.now()}-${group.group_name}-${index}`,
+        title: meal.title,
+        description: meal.description,
+        prep_time: meal.prep_time,
+        cook_time: meal.cook_time,
+        total_time: meal.prep_time + meal.cook_time,
+        servings: meal.servings,
+        ingredients: meal.ingredients.map(ing => ({
+          name: ing.name,
+          amount: ing.amount,
+          unit: ing.unit,
+          category: ing.category
+        })),
+        instructions: meal.instructions,
+        tags: meal.tags,
+        dietary_info: meal.dietary_info,
+        difficulty: meal.difficulty as 'easy' | 'medium' | 'hard',
+        group_id: group.group_name, // Using group_name as identifier for now
+        created_at: new Date().toISOString()
+      }))
+
+      // Validate each generated meal
+      const validMeals: GeneratedMeal[] = []
+      groupMeals.forEach(meal => {
+        const isValid = validateGeneratedMeal(meal)
+        if (isValid) {
+          validMeals.push(meal)
+        } else {
+          console.warn('Invalid meal generated:', (meal as any)?.title || 'Unknown')
+        }
+      })
+
+      if (validMeals.length > 0) {
+        groupedMeals[group.group_name] = validMeals
+      }
+    })
+
+    if (Object.keys(groupedMeals).length === 0) {
+      throw new Error('No valid meals were generated for any group')
+    }
+
+    return groupedMeals
+
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Combined meal generation failed: ${error.message}`)
+    }
+    throw new Error('Combined meal generation failed with unknown error')
+  }
+}
+
+/**
  * Meal validation and parsing
  */
 export function validateGeneratedMeal(meal: any): meal is GeneratedMeal {
@@ -601,6 +855,60 @@ export function validateIngredient(ingredient: any): ingredient is Ingredient {
 }
 
 /**
+ * Validate that meal generation makes sense for the plan
+ */
+export function validatePlanForGeneration(planData: PlanData, availableGroups: StoredGroup[]): {
+  isValid: boolean
+  errors: string[]
+  warnings: string[]
+} {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  // Check if we have groups available
+  if (availableGroups.length === 0) {
+    errors.push('No family groups found. Create groups first.')
+    return { isValid: false, errors, warnings }
+  }
+
+  // Check if plan groups exist
+  const groupIds = new Set(availableGroups.map(g => g.id))
+  const missingGroups = planData.group_meals.filter(gm => !groupIds.has(gm.group_id))
+  
+  if (missingGroups.length > 0) {
+    errors.push(`Groups not found: ${missingGroups.map(g => g.group_id).join(', ')}`)
+  }
+
+  // Check meal count limits
+  const highMealCounts = planData.group_meals.filter(gm => gm.meal_count > 7)
+  if (highMealCounts.length > 0) {
+    warnings.push('Some groups have high meal counts (>7). Generation may take longer.')
+  }
+
+  // Check total meal count
+  const totalMeals = planData.group_meals.reduce((sum, gm) => sum + gm.meal_count, 0)
+  if (totalMeals > 25) {
+    warnings.push('Large number of total meals requested. Consider splitting into multiple plans.')
+  }
+
+  // Check for groups with dietary restrictions
+  const groupsWithDietaryRestrictions = availableGroups.filter(g => 
+    planData.group_meals.some(gm => gm.group_id === g.id) && 
+    g.dietary_restrictions.length > 0
+  )
+  
+  if (groupsWithDietaryRestrictions.length > 0) {
+    warnings.push('Some groups have dietary restrictions. AI will accommodate these preferences.')
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+    warnings
+  }
+}
+
+/**
  * Build context for meal generation from plan and groups
  */
 export function buildGroupContexts(
@@ -632,4 +940,140 @@ export function buildGroupContexts(
       adult_equivalent
     }
   })
+}
+
+/**
+ * Generate mock meals for development mode
+ */
+function generateMockMealsForCombinedRequest(
+  request: CombinedChatGPTMealRequest
+): Record<string, GeneratedMeal[]> {
+  const mockMeals: Record<string, GeneratedMeal[]> = {}
+  
+  request.groups.forEach((group, groupIndex) => {
+    const meals: GeneratedMeal[] = []
+    
+    for (let i = 0; i < group.meals_to_generate; i++) {
+      const meal: GeneratedMeal = {
+        id: `mock-meal-${Date.now()}-${groupIndex}-${i}`,
+        title: getMockMealTitle(i),
+        description: getMockMealDescription(i),
+        prep_time: 15 + (i * 5),
+        cook_time: 20 + (i * 10),
+        total_time: 35 + (i * 15),
+        servings: 4,
+        ingredients: getMockIngredients(i),
+        instructions: getMockInstructions(i),
+        tags: getMockTags(i, group.dietary_restrictions),
+        dietary_info: group.dietary_restrictions.length > 0 ? group.dietary_restrictions : ['family-friendly'],
+        difficulty: ['easy', 'medium', 'hard'][i % 3] as 'easy' | 'medium' | 'hard',
+        group_id: group.group_name,
+        created_at: new Date().toISOString()
+      }
+      meals.push(meal)
+    }
+    
+    mockMeals[group.group_name] = meals
+  })
+  
+  return mockMeals
+}
+
+function getMockMealTitle(index: number): string {
+  const titles = [
+    'Spaghetti with Marinara Sauce',
+    'Grilled Chicken and Vegetables',
+    'Beef Stir Fry with Rice',
+    'Baked Salmon with Lemon',
+    'Turkey and Cheese Sandwiches',
+    'Vegetable Curry with Quinoa',
+    'BBQ Pork Ribs',
+    'Chicken Caesar Salad'
+  ]
+  return titles[index % titles.length]
+}
+
+function getMockMealDescription(index: number): string {
+  const descriptions = [
+    'A classic Italian pasta dish with rich tomato sauce',
+    'Healthy grilled protein with seasonal vegetables',
+    'Quick and easy Asian-inspired stir fry',
+    'Omega-rich fish with bright citrus flavors',
+    'Simple and satisfying lunch option',
+    'Nutritious plant-based meal with spices',
+    'Tender, smoky ribs perfect for family dinner',
+    'Fresh salad with crispy chicken and parmesan'
+  ]
+  return descriptions[index % descriptions.length]
+}
+
+function getMockIngredients(index: number): Ingredient[] {
+  const ingredientSets = [
+    [
+      { name: 'Spaghetti pasta', amount: 1, unit: 'lb', category: 'grains' },
+      { name: 'Marinara sauce', amount: 2, unit: 'cups', category: 'condiments' },
+      { name: 'Ground beef', amount: 0.5, unit: 'lb', category: 'protein' },
+      { name: 'Parmesan cheese', amount: 0.5, unit: 'cup', category: 'dairy' }
+    ],
+    [
+      { name: 'Chicken breast', amount: 1.5, unit: 'lbs', category: 'protein' },
+      { name: 'Bell peppers', amount: 2, unit: 'whole', category: 'vegetables' },
+      { name: 'Zucchini', amount: 1, unit: 'whole', category: 'vegetables' },
+      { name: 'Olive oil', amount: 2, unit: 'tbsp', category: 'oils_fats' }
+    ],
+    [
+      { name: 'Beef strips', amount: 1, unit: 'lb', category: 'protein' },
+      { name: 'White rice', amount: 1, unit: 'cup', category: 'grains' },
+      { name: 'Mixed vegetables', amount: 2, unit: 'cups', category: 'frozen' },
+      { name: 'Soy sauce', amount: 3, unit: 'tbsp', category: 'condiments' }
+    ]
+  ]
+  return ingredientSets[index % ingredientSets.length]
+}
+
+function getMockInstructions(index: number): string[] {
+  const instructionSets = [
+    [
+      'Boil water and cook spaghetti according to package directions',
+      'Brown ground beef in a large pan',
+      'Add marinara sauce and simmer for 10 minutes',
+      'Drain pasta and serve with sauce',
+      'Top with parmesan cheese'
+    ],
+    [
+      'Preheat grill to medium-high heat',
+      'Season chicken breasts with salt and pepper',
+      'Grill chicken for 6-8 minutes per side',
+      'Grill vegetables until tender',
+      'Let rest for 5 minutes before serving'
+    ],
+    [
+      'Cook rice according to package directions',
+      'Heat oil in large wok or skillet',
+      'Add beef and cook until browned',
+      'Add vegetables and stir-fry for 5 minutes',
+      'Add soy sauce and serve over rice'
+    ]
+  ]
+  return instructionSets[index % instructionSets.length]
+}
+
+function getMockTags(index: number, dietaryRestrictions: string[]): string[] {
+  const baseTags = ['family-friendly', 'easy', 'weeknight']
+  const extraTags = [
+    ['pasta', 'italian'],
+    ['grilled', 'healthy'],
+    ['asian', 'quick']
+  ]
+  
+  let tags = [...baseTags, ...extraTags[index % extraTags.length]]
+  
+  if (dietaryRestrictions.includes('vegetarian')) {
+    tags.push('vegetarian')
+  }
+  if (dietaryRestrictions.includes('gluten-free')) {
+    tags.push('gluten-free')
+  }
+  
+  return tags
 }

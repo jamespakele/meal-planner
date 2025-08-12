@@ -13,7 +13,20 @@
       "Bash(npm run dev:*)",
       "Bash(npm run lint)",
       "Bash(npx tsc:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(tasklist:*)",
+      "Bash(taskkill:*)",
+      "Bash(cmd //c:*)",
+      "Bash(npm install:*)",
+      "Bash(npx supabase:*)",
+      "Bash(curl:*)",
+      "Bash(start:*)",
+      "Bash(cloudflared tunnel:*)",
+      "Bash(docker rm:*)",
+      "Bash(rm:*)",
+      "Bash(docker volume:*)",
+      "Bash(rd:*)",
+      "Bash(npx jest:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
