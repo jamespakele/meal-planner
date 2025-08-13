@@ -103,10 +103,9 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
       if (mealsError) throw mealsError
       setMeals(mealsData || [])
 
-      // Set the first group as selected if we have meals
+      // Default to "All Groups" (null) when meals are loaded
       if (mealsData && mealsData.length > 0) {
-        const groups = [...new Set(mealsData.map(m => m.group_id))]
-        setSelectedGroup(groups[0])
+        setSelectedGroup(null) // This will show "All Groups" as selected
       }
 
     } catch (error) {
