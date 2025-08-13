@@ -50,6 +50,8 @@ export default function MealGenerationTrigger({ plan, onSuccess, onError }: Meal
     }
   })
 
+  console.log('MealGenerationTrigger render - status:', status, 'progress:', progress, 'currentStep:', currentStep)
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -65,11 +67,16 @@ export default function MealGenerationTrigger({ plan, onSuccess, onError }: Meal
   }, [status, totalMeals, plan?.id, onSuccess])
 
   const handleGenerate = async () => {
-    if (!plan || status === 'processing') {
+    if (!plan || status === 'processing' || status === 'pending') {
+      console.log('Generate blocked: plan exists=', !!plan, 'status=', status)
       return
     }
 
+    console.log('Starting meal generation for plan:', plan.id)
     setLocalError(null)
+
+    // Stop any existing polling first
+    stopPolling()
 
     try {
       const result = await generateMealsForPlan(plan.id, {
@@ -79,10 +86,15 @@ export default function MealGenerationTrigger({ plan, onSuccess, onError }: Meal
         group_meals: plan.group_meals
       })
 
+      console.log('Meal generation API result:', result)
       if (result.jobId) {
+        console.log('Starting polling for job:', result.jobId)
         startPolling(result.jobId)
+      } else {
+        throw new Error('No job ID returned from API')
       }
     } catch (error) {
+      console.error('Meal generation error:', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
       setLocalError(`Failed to start meal generation: ${errorMessage}`)
       onError?.(errorMessage)
@@ -247,16 +259,27 @@ export default function MealGenerationTrigger({ plan, onSuccess, onError }: Meal
     <div className="text-center py-4">
       <button
         onClick={handleGenerate}
-        className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition-colors"
+        disabled={status === 'processing' || status === 'pending'}
+        className={`font-bold py-2 px-4 rounded transition-colors ${
+          status === 'processing' || status === 'pending'
+            ? 'bg-gray-400 text-white cursor-not-allowed'
+            : 'bg-green-500 hover:bg-green-700 text-white'
+        }`}
         aria-describedby="generation-description"
       >
-        Generate Meals for {plan.name}
+        {status === 'processing' || status === 'pending' 
+          ? 'Generating...' 
+          : `Generate Meals for ${plan.name}`
+        } (Status: {status})
       </button>
       <p 
         id="generation-description" 
         className="text-sm text-gray-600 mt-2"
       >
         Generate {totalMealCount} AI-powered meal{totalMealCount !== 1 ? 's' : ''} for this plan
+      </p>
+      <p className="text-xs text-gray-500 mt-1">
+        Progress: {progress}% | Step: {currentStep || 'Ready'}
       </p>
     </div>
   )

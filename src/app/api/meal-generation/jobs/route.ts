@@ -114,7 +114,13 @@ export async function POST(request: NextRequest) {
     }
     
     // Start background processing using Supabase
-    processJobInBackground(job.id, user.id, groupsData, planData)
+    const { processJobInBackground } = await import('@/lib/backgroundJobProcessor')
+    
+    console.log(`[DEBUG] Starting background processing for job ${job.id}`)
+    // Don't await this - let it run in background
+    processJobInBackground(job.id, user.id, groupsData, planData).catch(error => {
+      console.error(`[ERROR] Background processing failed for job ${job.id}:`, error)
+    })
 
     const response: MealGenerationJobResponse = {
       jobId: job.id,
@@ -228,11 +234,15 @@ async function processJobInBackground(
   groupsData: any[], 
   planData: PlanData
 ) {
-  const supabase = await createClient()
+  console.log(`[BACKGROUND] Processing job ${jobId} for user ${userId}`)
   
   try {
+    const supabase = await createClient()
+    console.log(`[BACKGROUND] Supabase client created successfully`)
+    
+    console.log(`[BACKGROUND] Updating job ${jobId} to processing status`)
     // Update job status to processing
-    await supabase
+    const updateResult = await supabase
       .from('meal_generation_jobs')
       .update({
         status: 'processing',
@@ -241,6 +251,12 @@ async function processJobInBackground(
         current_step: 'Preparing AI request...'
       })
       .eq('id', jobId)
+
+    if (updateResult.error) {
+      console.error(`[BACKGROUND] Failed to update job status:`, updateResult.error)
+      throw updateResult.error
+    }
+    console.log(`[BACKGROUND] Job status updated successfully`)
 
     // Import the meal generator functions
     const { generateMealsWithCombinedChatGPT } = await import('@/lib/mealGenerator')

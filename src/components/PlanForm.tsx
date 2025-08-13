@@ -10,9 +10,10 @@ interface PlanFormProps {
   onCancel: () => void
   initialData?: PlanData
   enableMealGeneration?: boolean
+  availableGroups?: StoredGroup[]
 }
 
-export default function PlanForm({ onSubmit, onCancel, initialData, enableMealGeneration = true }: PlanFormProps) {
+export default function PlanForm({ onSubmit, onCancel, initialData, enableMealGeneration = true, availableGroups: propGroups }: PlanFormProps) {
   const [formData, setFormData] = useState<PlanData>({
     name: initialData?.name || '',
     week_start: initialData?.week_start || '',
@@ -29,10 +30,10 @@ export default function PlanForm({ onSubmit, onCancel, initialData, enableMealGe
   const isEditing = Boolean(initialData)
 
   useEffect(() => {
-    // Load available groups
-    const groups = getStoredGroups()
+    // Load available groups - use prop groups if provided, otherwise fallback to mock
+    const groups = propGroups || getStoredGroups()
     setAvailableGroups(groups)
-  }, [])
+  }, [propGroups])
 
   // Removed debug request useEffect - meal generation handled separately
 

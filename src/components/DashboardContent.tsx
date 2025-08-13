@@ -596,6 +596,7 @@ function PlansTab() {
             <PlanForm
               onSubmit={handleCreatePlan}
               onCancel={handleCancelForm}
+              availableGroups={availableGroups}
             />
           </div>
         </div>
@@ -617,6 +618,7 @@ function PlansTab() {
               onSubmit={handleEditPlan}
               onCancel={handleCancelForm}
               initialData={editingPlan}
+              availableGroups={availableGroups}
             />
           </div>
         </div>

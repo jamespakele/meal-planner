@@ -156,7 +156,7 @@ export interface MealGenerationResult {
 // Configuration constants
 export const MEAL_GENERATION_CONFIG = {
   MAX_RETRIES: 3,
-  TIMEOUT_MS: 30000,
+  TIMEOUT_MS: 60000,
   DEFAULT_EXTRA_MEALS: 2, // Generate 2 more than requested
   MAX_MEALS_PER_GROUP: 10,
   MIN_PREP_TIME: 5,
@@ -456,7 +456,7 @@ Return ONLY valid JSON in this exact format:
         'Authorization': `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY || process.env.OPENAI_API_KEY}`
       },
       body: JSON.stringify({
-        model: 'gpt-4',
+        model: 'gpt-3.5-turbo',
         messages: [
           {
             role: 'system',
@@ -632,19 +632,32 @@ Return ONLY valid JSON in this exact format:
 
   try {
     // Development mode: Use mock data instead of actual API call
+    console.log(`[MEAL_GEN] NODE_ENV: ${process.env.NODE_ENV}, OPENAI_API_KEY exists: ${!!process.env.OPENAI_API_KEY}`)
+    console.log(`[MEAL_GEN] OPENAI_API_KEY length: ${process.env.OPENAI_API_KEY?.length || 0}`)
+    console.log(`[MEAL_GEN] OPENAI_API_KEY starts with: ${process.env.OPENAI_API_KEY?.substring(0, 10)}...`)
+    
     if (process.env.NODE_ENV === 'development' && !process.env.OPENAI_API_KEY) {
+      console.log(`[MEAL_GEN] Using mock data for development mode`)
       return generateMockMealsForCombinedRequest(request)
     }
+    
+    console.log(`[MEAL_GEN] Making actual API call to ChatGPT`)
+    console.log(`[MEAL_GEN] Request URL: https://api.openai.com/v1/chat/completions`)
+    console.log(`[MEAL_GEN] Using model: gpt-4`)
+    console.log(`[MEAL_GEN] Timeout: ${MEAL_GENERATION_CONFIG.TIMEOUT_MS}ms`)
+    console.log(`[MEAL_GEN] Prompt length: ${prompt.length} characters`)
 
     // Make API call to OpenAI
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    let response
+    try {
+      response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY || process.env.OPENAI_API_KEY}`
       },
       body: JSON.stringify({
-        model: 'gpt-4',
+        model: 'gpt-3.5-turbo',
         messages: [
           {
             role: 'system',
@@ -655,14 +668,25 @@ Return ONLY valid JSON in this exact format:
             content: prompt
           }
         ],
-        max_tokens: 6000, // Increased for multiple groups
+        max_tokens: 4000, // GPT-3.5-turbo max is 4096
         temperature: 0.7
       }),
       signal: AbortSignal.timeout(MEAL_GENERATION_CONFIG.TIMEOUT_MS)
     })
 
-    if (!response.ok) {
-      throw new Error(`ChatGPT API error: ${response.status} ${response.statusText}`)
+      console.log(`[MEAL_GEN] API Response received - Status: ${response.status} ${response.statusText}`)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error(`[MEAL_GEN] API Error Response:`, errorText)
+        throw new Error(`ChatGPT API error: ${response.status} ${response.statusText} - ${errorText}`)
+      }
+    } catch (fetchError) {
+      console.error(`[MEAL_GEN] Fetch failed:`, fetchError)
+      if (fetchError.name === 'AbortError' || fetchError.message.includes('aborted')) {
+        throw new Error('Request timed out - try reducing the number of meals or groups')
+      }
+      throw fetchError
     }
 
     const data = await response.json()

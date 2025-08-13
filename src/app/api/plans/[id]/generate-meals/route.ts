@@ -111,15 +111,19 @@ export async function POST(
       )
     }
 
-    // Build groups data for the meal generation job
-    const groupsData = userGroups.map(group => ({
-      id: group.id,
-      name: group.name,
-      adults: group.adults,
-      teens: group.teens,
-      kids: group.kids,
-      toddlers: group.toddlers,
-      dietary_restrictions: group.dietary_restrictions
+    // Build groups data for the meal generation job - match the structure expected by meal generator
+    const { buildGroupContexts } = await import('@/lib/mealGenerator')
+    const groupContexts = buildGroupContexts(planData, userGroups)
+    
+    // Transform to the format expected by background processor
+    const groupsData = groupContexts.map(context => ({
+      group_id: context.group_id,
+      group_name: context.group_name,
+      demographics: context.demographics,
+      dietary_restrictions: context.dietary_restrictions,
+      meals_to_generate: context.meal_count_requested + 2, // DEFAULT_EXTRA_MEALS
+      group_notes: context.group_notes,
+      adult_equivalent: context.adult_equivalent
     }))
 
     // Create meal generation job
@@ -143,6 +147,15 @@ export async function POST(
         { status: 500 }
       )
     }
+
+    // Start background processing
+    const { processJobInBackground } = await import('@/lib/backgroundJobProcessor')
+    
+    console.log(`[DEBUG] Starting background processing for plan job ${job.id}`)
+    // Don't await this - let it run in background
+    processJobInBackground(job.id, user.id, groupsData, planData).catch(error => {
+      console.error(`[ERROR] Background processing failed for plan job ${job.id}:`, error)
+    })
 
     // Update the plan to reference this job (optional - for tracking)
     const { error: updateError } = await supabase
