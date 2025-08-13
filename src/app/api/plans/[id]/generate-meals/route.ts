@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { validatePlan, validatePlanForGeneration } from '@/lib/planValidation'
+import { validatePlan } from '@/lib/planValidation'
+import { validatePlanForGeneration } from '@/lib/mealGenerator'
 
 export async function POST(
   request: NextRequest,
@@ -99,7 +100,7 @@ export async function POST(
       )
     }
 
-    const generationValidation = validatePlanForGeneration(planData)
+    const generationValidation = validatePlanForGeneration(planData, userGroups)
     if (!generationValidation.isValid) {
       return NextResponse.json(
         { 
@@ -147,7 +148,6 @@ export async function POST(
     const { error: updateError } = await supabase
       .from('meal_plans')
       .update({ 
-        status: 'generating',
         updated_at: new Date().toISOString()
       })
       .eq('id', planId)

@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    // Start background processing
+    // Start background processing using Supabase
     processJobInBackground(job.id, user.id, groupsData, planData)
 
     const response: MealGenerationJobResponse = {
@@ -135,27 +135,25 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    // DEVELOPMENT MODE: Skip Supabase auth and use mock user
-    const isDevelopment = process.env.NODE_ENV === 'development'
-    let user = null
+    // Always try Supabase auth first
+    const supabase = await createClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
     
-    if (isDevelopment) {
-      // Mock user for development
-      user = {
+    // If no authenticated user and in development, use mock
+    const isDevelopment = process.env.NODE_ENV === 'development'
+    let finalUser = user
+    
+    if (!user && isDevelopment) {
+      // Mock user for development only when no real user
+      finalUser = {
         id: 'dev-user-123',
         email: 'dev@example.com'
-      }
-    } else {
-      // Production: Use Supabase auth
-      const supabase = await createClient()
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
-      if (authError || !authUser) {
-        return NextResponse.json(
-          { error: 'Authentication required' },
-          { status: 401 }
-        )
-      }
-      user = authUser
+      } as any
+    } else if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      )
     }
 
     // Get query parameters
@@ -164,11 +162,10 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status')
 
     let jobs
-    if (isDevelopment) {
-      // Use development storage
-      jobs = await handleDevelopmentQuery(jobId || undefined, status || undefined)
-    } else {
-      // Use Supabase database
+    
+    // Use Supabase if we have a real authenticated user, otherwise fall back to development storage
+    if (user && !user.id.startsWith('dev-')) {
+      // Use Supabase database for real users
       const supabase = await createClient()
       let query = supabase
         .from('meal_generation_jobs')
@@ -208,6 +205,9 @@ export async function GET(request: NextRequest) {
       }
       
       jobs = dbJobs
+    } else {
+      // Use development storage for mock users or when no real user
+      jobs = await handleDevelopmentQuery(jobId || undefined, status || undefined)
     }
 
     return NextResponse.json({ jobs })
