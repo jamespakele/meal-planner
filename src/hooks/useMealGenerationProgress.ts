@@ -16,6 +16,7 @@ interface UseMealGenerationProgressReturn {
   error: string | null
   currentStep: string | null
   totalMeals: number | null
+  jobId: string | null
   startPolling: (jobId: string) => void
   stopPolling: () => void
   reset: () => void
@@ -31,6 +32,7 @@ export function useMealGenerationProgress(
   const [error, setError] = useState<string | null>(null)
   const [currentStep, setCurrentStep] = useState<string | null>(null)
   const [totalMeals, setTotalMeals] = useState<number | null>(null)
+  const [jobId, setJobId] = useState<string | null>(null)
 
   const pollerRef = useRef<ReturnType<typeof createMealGenerationPoller> | null>(null)
   const currentJobIdRef = useRef<string | null>(null)
@@ -74,6 +76,7 @@ export function useMealGenerationProgress(
     }
 
     currentJobIdRef.current = jobId
+    setJobId(jobId)
     setStatus('pending')
     setProgress(0)
     setError(null)
@@ -105,6 +108,7 @@ export function useMealGenerationProgress(
     setError(null)
     setCurrentStep(null)
     setTotalMeals(null)
+    setJobId(null)
   }, [stopPolling])
 
   // Cleanup on unmount
@@ -128,6 +132,7 @@ export function useMealGenerationProgress(
     error,
     currentStep,
     totalMeals,
+    jobId,
     startPolling,
     stopPolling,
     reset

@@ -37,6 +37,7 @@ export default function MealGenerationTrigger({ plan, onSuccess, onError }: Meal
     error: progressError,
     currentStep,
     totalMeals,
+    jobId,
     startPolling,
     stopPolling,
     reset
@@ -203,12 +204,22 @@ export default function MealGenerationTrigger({ plan, onSuccess, onError }: Meal
             </div>
           </div>
         </div>
-        <button
-          onClick={handleGenerateAgain}
-          className="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded transition-colors"
-        >
-          Generate Again
-        </button>
+        <div className="flex space-x-3 justify-center">
+          {jobId && (
+            <a
+              href={`/meals/${jobId}`}
+              className="bg-green-500 hover:bg-green-600 text-white font-medium py-2 px-4 rounded transition-colors"
+            >
+              View Generated Meals
+            </a>
+          )}
+          <button
+            onClick={handleGenerateAgain}
+            className="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded transition-colors"
+          >
+            Generate Again
+          </button>
+        </div>
       </div>
     )
   }

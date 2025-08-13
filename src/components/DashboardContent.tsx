@@ -16,6 +16,22 @@ export default function DashboardContent() {
   // Use singleton client to prevent per-render creation
   const supabase = useMemo(() => getSupabaseClient(), [])
 
+  // Check URL hash on mount to set initial tab
+  useEffect(() => {
+    const hash = window.location.hash
+    if (hash === '#plans') {
+      setActiveTab('plans')
+    } else if (hash === '#groups') {
+      setActiveTab('groups')
+    }
+  }, [])
+
+  // Update URL hash when tab changes
+  const handleTabChange = (tab: 'groups' | 'plans') => {
+    setActiveTab(tab)
+    window.history.replaceState(null, '', `#${tab}`)
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -41,7 +57,7 @@ export default function DashboardContent() {
         <div className="border-b border-gray-200">
           <nav className="-mb-px flex space-x-8">
             <button
-              onClick={() => setActiveTab('groups')}
+              onClick={() => handleTabChange('groups')}
               className={`py-2 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'groups'
                   ? 'border-blue-500 text-blue-600'
@@ -51,7 +67,7 @@ export default function DashboardContent() {
               Groups
             </button>
             <button
-              onClick={() => setActiveTab('plans')}
+              onClick={() => handleTabChange('plans')}
               className={`py-2 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'plans'
                   ? 'border-blue-500 text-blue-600'
@@ -349,6 +365,7 @@ function PlansTab() {
   const { user } = useAuth()
   const [plans, setPlans] = useState<any[]>([])
   const [availableGroups, setAvailableGroups] = useState<any[]>([])
+  const [planMealsStatus, setPlanMealsStatus] = useState<Record<string, { hasGeneratedMeals: boolean, jobId: string | null }>>({})
   const [loading, setLoading] = useState(true)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [editingPlan, setEditingPlan] = useState<any | null>(null)
@@ -363,6 +380,12 @@ function PlansTab() {
       loadPlans()
     }
   }, [user])
+
+  useEffect(() => {
+    if (plans.length > 0) {
+      checkGeneratedMealsForPlans()
+    }
+  }, [plans])
 
   const loadPlans = async () => {
     try {
@@ -402,6 +425,59 @@ function PlansTab() {
     } catch (error) {
       console.error('Error loading groups:', error)
       return []
+    }
+  }
+
+  const checkGeneratedMealsForPlans = async () => {
+    try {
+      const mealsStatus: Record<string, { hasGeneratedMeals: boolean, jobId: string | null }> = {}
+
+      // For each plan, check if there are generated meals
+      for (const plan of plans) {
+        // First, try to find a job for this plan by checking meal_generation_jobs table
+        const { data: jobs, error: jobError } = await supabase
+          .from('meal_generation_jobs')
+          .select('id, status')
+          .eq('user_id', user?.id)
+          .eq('plan_name', plan.name)
+          .eq('week_start', plan.week_start)
+          .eq('status', 'completed')
+          .order('created_at', { ascending: false })
+          .limit(1)
+
+        if (jobError) {
+          console.error('Error checking jobs for plan:', plan.id, jobError)
+          mealsStatus[plan.id] = { hasGeneratedMeals: false, jobId: null }
+          continue
+        }
+
+        if (jobs && jobs.length > 0) {
+          const jobId = jobs[0].id
+
+          // Check if this job has generated meals
+          const { data: meals, error: mealsError } = await supabase
+            .from('generated_meals')
+            .select('id')
+            .eq('job_id', jobId)
+            .limit(1)
+
+          if (mealsError) {
+            console.error('Error checking meals for job:', jobId, mealsError)
+            mealsStatus[plan.id] = { hasGeneratedMeals: false, jobId: null }
+          } else {
+            mealsStatus[plan.id] = {
+              hasGeneratedMeals: meals && meals.length > 0,
+              jobId: meals && meals.length > 0 ? jobId : null
+            }
+          }
+        } else {
+          mealsStatus[plan.id] = { hasGeneratedMeals: false, jobId: null }
+        }
+      }
+
+      setPlanMealsStatus(mealsStatus)
+    } catch (error) {
+      console.error('Error checking generated meals for plans:', error)
     }
   }
 
@@ -486,8 +562,8 @@ function PlansTab() {
   const handleMealGenerationSuccess = (planId: string, totalMeals: number) => {
     // You could add a success notification here
     console.log(`Successfully generated ${totalMeals} meals for plan ${planId}`)
-    // Optionally reload the plan to show any updated status
-    // loadPlans()
+    // Refresh the meal status to show the new "View Generated Meals" button
+    checkGeneratedMealsForPlans()
   }
 
   const handleMealGenerationError = (error: string) => {
@@ -724,6 +800,11 @@ function PlansTab() {
                           <p className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
                             {totalMeals} total meals
                           </p>
+                          {planMealsStatus[plan.id]?.hasGeneratedMeals && (
+                            <p className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
+                              ✓ Meals Generated
+                            </p>
+                          )}
                           <p className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
                             Active
                           </p>
@@ -811,18 +892,30 @@ function PlansTab() {
                       </div>
                     </div>
                     <div className="ml-4 flex-shrink-0">
-                      <button
-                        onClick={() => setEditingPlan(plan)}
-                        className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded mr-2"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDeletePlan(plan.id)}
-                        className="bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded"
-                      >
-                        Delete
-                      </button>
+                      <div className="flex flex-col space-y-2">
+                        <div className="flex space-x-2">
+                          {planMealsStatus[plan.id]?.hasGeneratedMeals && planMealsStatus[plan.id]?.jobId && (
+                            <a
+                              href={`/meals/${planMealsStatus[plan.id].jobId}`}
+                              className="bg-green-500 hover:bg-green-600 text-white font-medium py-2 px-4 rounded text-sm"
+                            >
+                              View Generated Meals
+                            </a>
+                          )}
+                          <button
+                            onClick={() => setEditingPlan(plan)}
+                            className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeletePlan(plan.id)}
+                            className="bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </li>

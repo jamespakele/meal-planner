@@ -460,7 +460,7 @@ Return ONLY valid JSON in this exact format:
         messages: [
           {
             role: 'system',
-            content: 'You are a professional meal planning assistant. Generate meal suggestions that are practical, nutritious, and appropriate for the specified demographics and dietary restrictions. Return ONLY valid JSON.'
+            content: 'You are a professional meal planning assistant. Generate meal suggestions that are practical, nutritious, and appropriate for the specified demographics and dietary restrictions. CRITICAL: You must return ONLY valid JSON with no additional text, markdown formatting, or explanations. The response must be parseable by JSON.parse().'
           },
           {
             role: 'user',
@@ -484,12 +484,50 @@ Return ONLY valid JSON in this exact format:
       throw new Error('No content received from ChatGPT API')
     }
 
-    // Parse the JSON response
+    // Parse the JSON response with improved error handling
     let parsedResponse: ChatGPTMealResponse
     try {
-      parsedResponse = JSON.parse(content)
+      // Clean the content first - remove potential markdown formatting or extra text
+      let cleanContent = content.trim()
+      
+      // Look for JSON content between braces if there's extra text
+      const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        cleanContent = jsonMatch[0]
+      }
+      
+      // Try to fix common JSON issues
+      cleanContent = cleanContent
+        .replace(/,\s*}/g, '}') // Remove trailing commas
+        .replace(/,\s*]/g, ']') // Remove trailing commas in arrays
+        .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":') // Quote unquoted keys
+      
+      parsedResponse = JSON.parse(cleanContent)
     } catch (parseError) {
-      throw new Error(`Failed to parse ChatGPT response as JSON: ${parseError}`)
+      console.error(`[MEAL_GEN] JSON parsing failed. Original content:`, content)
+      
+      // Try one more aggressive cleaning attempt
+      try {
+        let aggressiveClean = content
+          .replace(/```json/g, '') // Remove markdown
+          .replace(/```/g, '') // Remove markdown
+          .replace(/\n/g, ' ') // Replace newlines with spaces
+          .replace(/\s+/g, ' ') // Normalize whitespace
+          .trim()
+        
+        // Find the main JSON object
+        const startBrace = aggressiveClean.indexOf('{')
+        const lastBrace = aggressiveClean.lastIndexOf('}')
+        
+        if (startBrace !== -1 && lastBrace !== -1 && lastBrace > startBrace) {
+          aggressiveClean = aggressiveClean.substring(startBrace, lastBrace + 1)
+          parsedResponse = JSON.parse(aggressiveClean)
+        } else {
+          throw parseError
+        }
+      } catch (secondaryError) {
+        throw new Error(`Failed to parse ChatGPT response as JSON: ${parseError}`)
+      }
     }
 
     if (!parsedResponse.meals || !Array.isArray(parsedResponse.meals)) {
@@ -661,7 +699,7 @@ Return ONLY valid JSON in this exact format:
         messages: [
           {
             role: 'system',
-            content: 'You are a professional meal planning assistant. Generate meal suggestions that are practical, nutritious, and appropriate for the specified demographics and dietary restrictions. Return ONLY valid JSON.'
+            content: 'You are a professional meal planning assistant. Generate meal suggestions that are practical, nutritious, and appropriate for the specified demographics and dietary restrictions. CRITICAL: You must return ONLY valid JSON with no additional text, markdown formatting, or explanations. The response must be parseable by JSON.parse().'
           },
           {
             role: 'user',
@@ -696,12 +734,55 @@ Return ONLY valid JSON in this exact format:
       throw new Error('No content received from ChatGPT API')
     }
 
-    // Parse the JSON response
+    // Parse the JSON response with improved error handling
     let parsedResponse: CombinedChatGPTMealResponse
     try {
-      parsedResponse = JSON.parse(content)
+      // Clean the content first - remove potential markdown formatting or extra text
+      let cleanContent = content.trim()
+      
+      // Look for JSON content between braces if there's extra text
+      const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        cleanContent = jsonMatch[0]
+      }
+      
+      // Try to fix common JSON issues
+      cleanContent = cleanContent
+        .replace(/,\s*}/g, '}') // Remove trailing commas
+        .replace(/,\s*]/g, ']') // Remove trailing commas in arrays
+        .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":') // Quote unquoted keys
+      
+      console.log(`[MEAL_GEN] Attempting to parse cleaned JSON (${cleanContent.length} chars)`)
+      console.log(`[MEAL_GEN] First 200 chars: ${cleanContent.substring(0, 200)}`)
+      
+      parsedResponse = JSON.parse(cleanContent)
     } catch (parseError) {
-      throw new Error(`Failed to parse ChatGPT response as JSON: ${parseError}`)
+      console.error(`[MEAL_GEN] JSON parsing failed. Original content:`, content)
+      console.error(`[MEAL_GEN] Parse error:`, parseError)
+      
+      // Try one more aggressive cleaning attempt
+      try {
+        let aggressiveClean = content
+          .replace(/```json/g, '') // Remove markdown
+          .replace(/```/g, '') // Remove markdown
+          .replace(/\n/g, ' ') // Replace newlines with spaces
+          .replace(/\s+/g, ' ') // Normalize whitespace
+          .trim()
+        
+        // Find the main JSON object
+        const startBrace = aggressiveClean.indexOf('{')
+        const lastBrace = aggressiveClean.lastIndexOf('}')
+        
+        if (startBrace !== -1 && lastBrace !== -1 && lastBrace > startBrace) {
+          aggressiveClean = aggressiveClean.substring(startBrace, lastBrace + 1)
+          console.log(`[MEAL_GEN] Trying aggressive cleanup: ${aggressiveClean.substring(0, 200)}...`)
+          parsedResponse = JSON.parse(aggressiveClean)
+        } else {
+          throw parseError
+        }
+      } catch (secondaryError) {
+        throw new Error(`Failed to parse ChatGPT response as JSON: ${parseError}`)
+      }
     }
 
     if (!parsedResponse.groups || !Array.isArray(parsedResponse.groups)) {
