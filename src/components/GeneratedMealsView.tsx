@@ -48,7 +48,7 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
   const [meals, setMeals] = useState<GeneratedMeal[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
   const [selectedMeal, setSelectedMeal] = useState<GeneratedMeal | null>(null)
   
   const supabase = getSupabaseClient()
@@ -103,9 +103,20 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
       if (mealsError) throw mealsError
       setMeals(mealsData || [])
 
-      // Default to "All Groups" (null) when meals are loaded
+      // Default all groups to expanded when meals are loaded
       if (mealsData && mealsData.length > 0) {
-        setSelectedGroup(null) // This will show "All Groups" as selected
+        const initialCollapsedState: Record<string, boolean> = {}
+        const uniqueGroups = mealsData.reduce((acc, meal) => {
+          if (!acc.find(g => g.id === meal.group_id)) {
+            acc.push({ id: meal.group_id, name: meal.group_name })
+          }
+          return acc
+        }, [] as { id: string, name: string }[])
+        
+        uniqueGroups.forEach(group => {
+          initialCollapsedState[group.id] = false // false means expanded
+        })
+        setCollapsedGroups(initialCollapsedState)
       }
 
     } catch (error) {
@@ -137,14 +148,35 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
     }
   }
 
-  const getUniqueGroups = () => {
-    const groups = meals.reduce((acc, meal) => {
-      if (!acc.find(g => g.id === meal.group_id)) {
-        acc.push({ id: meal.group_id, name: meal.group_name })
+  const getGroupsWithMeals = () => {
+    const groupsMap = new Map<string, {
+      id: string
+      name: string
+      meals: GeneratedMeal[]
+      selectedCount: number
+      totalCount: number
+    }>()
+
+    meals.forEach(meal => {
+      if (!groupsMap.has(meal.group_id)) {
+        groupsMap.set(meal.group_id, {
+          id: meal.group_id,
+          name: meal.group_name,
+          meals: [],
+          selectedCount: 0,
+          totalCount: 0
+        })
       }
-      return acc
-    }, [] as { id: string, name: string }[])
-    return groups
+      
+      const group = groupsMap.get(meal.group_id)!
+      group.meals.push(meal)
+      group.totalCount++
+      if (meal.selected) {
+        group.selectedCount++
+      }
+    })
+
+    return Array.from(groupsMap.values()).sort((a, b) => a.name.localeCompare(b.name))
   }
 
   const getSelectedMealsCount = () => {
@@ -195,10 +227,14 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
     )
   }
 
-  const groups = getUniqueGroups()
-  const filteredMeals = selectedGroup 
-    ? meals.filter(m => m.group_id === selectedGroup)
-    : meals
+  const groupsWithMeals = getGroupsWithMeals()
+  
+  const toggleGroupCollapse = (groupId: string) => {
+    setCollapsedGroups(prev => ({
+      ...prev,
+      [groupId]: !prev[groupId]
+    }))
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -232,61 +268,56 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="lg:grid lg:grid-cols-12 lg:gap-8">
-          {/* Sidebar - Group Filter */}
-          <div className="lg:col-span-3">
-            <div className="bg-white shadow rounded-lg p-4">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Filter by Group</h3>
-              <div className="space-y-2">
-                <button
-                  onClick={() => setSelectedGroup(null)}
-                  className={`w-full text-left px-3 py-2 rounded-md text-sm ${
-                    selectedGroup === null
-                      ? 'bg-blue-100 text-blue-800 font-medium'
-                      : 'text-gray-700 hover:bg-gray-100'
-                  }`}
-                >
-                  All Groups ({meals.length})
-                </button>
-                {groups.map((group) => {
-                  const groupMealCount = meals.filter(m => m.group_id === group.id).length
-                  const groupSelectedCount = meals.filter(m => m.group_id === group.id && m.selected).length
-                  
-                  return (
-                    <button
-                      key={group.id}
-                      onClick={() => setSelectedGroup(group.id)}
-                      className={`w-full text-left px-3 py-2 rounded-md text-sm ${
-                        selectedGroup === group.id
-                          ? 'bg-blue-100 text-blue-800 font-medium'
-                          : 'text-gray-700 hover:bg-gray-100'
-                      }`}
-                    >
-                      {group.name} ({groupSelectedCount}/{groupMealCount})
-                    </button>
-                  )
-                })}
-              </div>
+        {/* Main Content - Grouped Meals */}
+        {groupsWithMeals.length === 0 ? (
+          <div className="bg-white shadow rounded-lg p-8 text-center">
+            <div className="mx-auto h-12 w-12 text-gray-400">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
             </div>
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No meals found</h3>
+            <p className="mt-1 text-sm text-gray-500">No meals have been generated yet.</p>
           </div>
-
-          {/* Main Content - Meals Grid */}
-          <div className="mt-8 lg:mt-0 lg:col-span-9">
-            {filteredMeals.length === 0 ? (
-              <div className="bg-white shadow rounded-lg p-8 text-center">
-                <div className="mx-auto h-12 w-12 text-gray-400">
-                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                  </svg>
-                </div>
-                <h3 className="mt-2 text-sm font-medium text-gray-900">No meals found</h3>
-                <p className="mt-1 text-sm text-gray-500">
-                  {selectedGroup ? 'No meals found for this group.' : 'No meals have been generated yet.'}
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {filteredMeals.map((meal) => (
+        ) : (
+          <div className="space-y-6">
+            {groupsWithMeals.map((group) => {
+              const isCollapsed = collapsedGroups[group.id] || false
+              
+              return (
+                <div key={group.id} className="bg-white shadow rounded-lg overflow-hidden">
+                  {/* Group Header */}
+                  <button
+                    onClick={() => toggleGroupCollapse(group.id)}
+                    className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                    aria-expanded={!isCollapsed}
+                    aria-controls={`group-${group.id}-content`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <h2 className="text-xl font-semibold text-gray-900">{group.name}</h2>
+                      <span className="text-sm text-gray-600">
+                        ({group.selectedCount}/{group.totalCount} meals selected)
+                      </span>
+                    </div>
+                    <svg
+                      className={`w-5 h-5 text-gray-500 transition-transform duration-200 ${
+                        isCollapsed ? 'rotate-0' : 'rotate-180'
+                      }`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  
+                  {/* Group Content */}
+                  <div
+                    id={`group-${group.id}-content`}
+                    className={`${isCollapsed ? 'hidden' : 'block'} p-6 pt-0`}
+                  >
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {group.meals.map((meal) => (
                   <div
                     key={meal.id}
                     className={`bg-white shadow rounded-lg overflow-hidden transition-all ${
@@ -385,11 +416,14 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
                       </button>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
           </div>
-        </div>
+        )}
       </div>
 
       {/* Recipe Detail Modal */}
