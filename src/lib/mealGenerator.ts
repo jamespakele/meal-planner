@@ -156,7 +156,7 @@ export interface MealGenerationResult {
 // Configuration constants
 export const MEAL_GENERATION_CONFIG = {
   MAX_RETRIES: 3,
-  TIMEOUT_MS: 60000,
+  TIMEOUT_MS: 180000, // 3 minutes for GPT-4-Turbo to generate 14 meals
   DEFAULT_EXTRA_MEALS: 2, // Generate 2 more than requested
   MAX_MEALS_PER_GROUP: 10,
   MIN_PREP_TIME: 5,
@@ -235,6 +235,19 @@ export async function generateMealsForPlan(
       }
     }
 
+    // Check if we should use combined approach or individual calls
+    const totalMealsToGenerate = groupContexts.reduce((sum, context) => 
+      sum + (context.meal_count_requested + MEAL_GENERATION_CONFIG.DEFAULT_EXTRA_MEALS), 0
+    )
+    
+    console.log(`[DEBUG] Total meals to generate: ${totalMealsToGenerate}`)
+    
+    // If generating more than 12 meals total, use individual group approach to avoid token limits
+    if (totalMealsToGenerate > 12 || groupContexts.length > 3) {
+      console.log(`[DEBUG] Using individual group generation (${totalMealsToGenerate} meals, ${groupContexts.length} groups)`)
+      return await generateMealsForPlanIndividually(planData, availableGroups, groupContexts, startTime, errors, totalApiCalls, totalTokens)
+    }
+
     // Use combined approach - single API call for all groups
     const combinedRequest: CombinedChatGPTMealRequest = {
       plan_name: planData.name,
@@ -242,6 +255,7 @@ export async function generateMealsForPlan(
       additional_notes: planData.notes,
       groups: groupContexts.map(context => {
         const mealsToGenerate = context.meal_count_requested + MEAL_GENERATION_CONFIG.DEFAULT_EXTRA_MEALS
+        console.log(`[DEBUG] Calculating meals for ${context.group_name}: ${context.meal_count_requested} requested + ${MEAL_GENERATION_CONFIG.DEFAULT_EXTRA_MEALS} extra = ${mealsToGenerate} total`)
         
         // Check limits per group
         if (mealsToGenerate > MEAL_GENERATION_CONFIG.MAX_MEALS_PER_GROUP) {
@@ -252,7 +266,7 @@ export async function generateMealsForPlan(
           })
         }
 
-        return {
+        const groupRequest = {
           group_name: context.group_name,
           demographics: context.demographics,
           dietary_restrictions: context.dietary_restrictions,
@@ -260,6 +274,9 @@ export async function generateMealsForPlan(
           group_notes: context.group_notes,
           adult_equivalent: context.adult_equivalent
         }
+
+        console.log(`[DEBUG] Final group request for ${context.group_name}:`, { meals_to_generate: groupRequest.meals_to_generate })
+        return groupRequest
       })
     }
 
@@ -416,7 +433,7 @@ CONTEXT:
 - Scale ingredients for ${adult_equivalent} adult equivalent servings
 
 REQUIREMENTS:
-- Each meal must include title, description, prep_time (minutes), cook_time (minutes), servings (base servings before scaling), ingredients with amounts/units/categories, step-by-step instructions, tags, dietary_info, and difficulty level (easy/medium/hard)
+- Each meal must include title, brief description (max 15 words), prep_time, cook_time, servings, ingredients (max 6 per meal), concise instructions (max 3 steps), tags, dietary_info, and difficulty
 - Ingredients must be categorized: ${INGREDIENT_CATEGORIES.join(', ')}
 - Base servings should be 4-6 people, ingredients will be scaled later
 - Variety in cuisine types and cooking methods
@@ -456,18 +473,18 @@ Return ONLY valid JSON in this exact format:
         'Authorization': `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY || process.env.OPENAI_API_KEY}`
       },
       body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4-turbo',
         messages: [
           {
             role: 'system',
-            content: 'You are a professional meal planning assistant. Generate meal suggestions that are practical, nutritious, and appropriate for the specified demographics and dietary restrictions. CRITICAL: You must return ONLY valid JSON with no additional text, markdown formatting, or explanations. The response must be parseable by JSON.parse().'
+            content: 'You are a meal planning assistant. Return ONLY valid JSON with no additional text. Use decimal numbers (0.5, 0.25) not fractions. Generate EXACTLY the specified number of meals for each group.'
           },
           {
             role: 'user',
             content: prompt
           }
         ],
-        max_tokens: 4000,
+        max_tokens: 4096, // GPT-4-turbo maximum
         temperature: 0.7
       }),
       signal: AbortSignal.timeout(MEAL_GENERATION_CONFIG.TIMEOUT_MS)
@@ -526,6 +543,16 @@ Return ONLY valid JSON in this exact format:
           throw parseError
         }
       } catch (secondaryError) {
+        // Log detailed information for debugging
+        console.error(`[MEAL_GEN] Content length: ${content.length} characters`)
+        console.error(`[MEAL_GEN] Last 200 chars: ${content.slice(-200)}`)
+        console.error(`[MEAL_GEN] Looking for incomplete JSON structure...`)
+        
+        // Check if the response was likely truncated
+        if (content.length > 15000 && !content.trim().endsWith('}')) {
+          throw new Error(`ChatGPT response appears to be truncated (${content.length} chars). Try reducing the number of meals or groups, or increase API timeout.`)
+        }
+        
         throw new Error(`Failed to parse ChatGPT response as JSON: ${parseError}`)
       }
     }
@@ -583,6 +610,112 @@ Return ONLY valid JSON in this exact format:
 }
 
 /**
+ * Generate meals individually for each group when combined approach would exceed token limits
+ */
+async function generateMealsForPlanIndividually(
+  planData: PlanData,
+  availableGroups: StoredGroup[],
+  groupContexts: GroupContext[],
+  startTime: number,
+  errors: MealGenerationError[],
+  totalApiCalls: number,
+  totalTokens: number
+): Promise<MealGenerationResult> {
+  const groupMealOptions: GroupMealOptions[] = []
+
+  // Generate meals for each group individually
+  for (const context of groupContexts) {
+    try {
+      console.log(`[DEBUG] Generating meals individually for ${context.group_name}`)
+      
+      const individualRequest: ChatGPTMealRequest = {
+        group_name: context.group_name,
+        demographics: context.demographics,
+        dietary_restrictions: context.dietary_restrictions,
+        meals_to_generate: context.meal_count_requested + MEAL_GENERATION_CONFIG.DEFAULT_EXTRA_MEALS,
+        group_notes: context.group_notes,
+        week_start: planData.week_start,
+        adult_equivalent: context.adult_equivalent
+      }
+
+      const groupMeals = await generateMealsWithChatGPT(individualRequest)
+      totalApiCalls++
+
+      if (groupMeals.length > 0) {
+        // Calculate total servings needed
+        const scalingFactor = context.adult_equivalent / 4 // Assuming base recipes serve 4
+        const totalServingsNeeded = Math.ceil(groupMeals[0]?.servings * scalingFactor) || context.adult_equivalent
+
+        groupMealOptions.push({
+          group_id: context.group_id,
+          group_name: context.group_name,
+          requested_count: context.meal_count_requested,
+          generated_count: groupMeals.length,
+          meals: groupMeals,
+          adult_equivalent: context.adult_equivalent,
+          total_servings_needed: totalServingsNeeded
+        })
+
+        console.log(`[DEBUG] Successfully generated ${groupMeals.length} meals for ${context.group_name}`)
+      }
+    } catch (error) {
+      console.error(`[DEBUG] Failed to generate meals for ${context.group_name}:`, error)
+      errors.push({
+        code: 'GROUP_GENERATION_FAILED',
+        message: `Failed to generate meals for ${context.group_name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        group_id: context.group_id
+      })
+    }
+  }
+
+  // Calculate final results
+  const totalMealsGenerated = groupMealOptions.reduce(
+    (sum, option) => sum + option.generated_count, 0
+  )
+  const generationTime = Date.now() - startTime
+
+  // Determine success based on whether we got meals for most groups
+  const successfulGroups = groupMealOptions.length
+  const totalGroups = groupContexts.length
+  const hasAnyMeals = totalMealsGenerated > 0
+  const hasMinimalErrors = errors.length < totalGroups
+
+  if (hasAnyMeals && hasMinimalErrors && successfulGroups >= Math.ceil(totalGroups / 2)) {
+    return {
+      success: true,
+      data: {
+        plan_id: `plan-${Date.now()}`,
+        generated_at: new Date().toISOString(),
+        total_meals_generated: totalMealsGenerated,
+        group_meal_options: groupMealOptions,
+        generation_metadata: {
+          api_calls_made: totalApiCalls,
+          total_tokens_used: totalTokens > 0 ? totalTokens : undefined,
+          generation_time_ms: generationTime
+        }
+      },
+      errors: errors.length > 0 ? errors : undefined
+    }
+  } else {
+    return {
+      success: false,
+      data: hasAnyMeals ? {
+        plan_id: `plan-${Date.now()}`,
+        generated_at: new Date().toISOString(),
+        total_meals_generated: totalMealsGenerated,
+        group_meal_options: groupMealOptions,
+        generation_metadata: {
+          api_calls_made: totalApiCalls,
+          total_tokens_used: totalTokens > 0 ? totalTokens : undefined,
+          generation_time_ms: generationTime
+        }
+      } : undefined,
+      errors
+    }
+  }
+}
+
+/**
  * Combined ChatGPT API integration - single call for multiple groups
  */
 export async function generateMealsWithCombinedChatGPT(
@@ -625,12 +758,10 @@ ${index + 1}. GROUP: "${group_name}"
   prompt += `
 REQUIREMENTS:
 - Generate meals for ALL groups listed above
-- Each meal must include title, description, prep_time (minutes), cook_time (minutes), servings (base servings before scaling), ingredients with amounts/units/categories, step-by-step instructions, tags, dietary_info, and difficulty level (easy/medium/hard)
-- Ingredients must be categorized: ${INGREDIENT_CATEGORIES.join(', ')}
-- Base servings should be 4-6 people, ingredients will be scaled later
-- Variety in cuisine types and cooking methods
-- Family-friendly options when kids/toddlers are present
-- Respect each group's dietary restrictions
+- Each meal: title, description (max 10 words), prep_time, cook_time, servings, ingredients (max 5), instructions (max 2 steps), tags, dietary_info, difficulty
+- Ingredient categories: protein, vegetables, fruits, grains, dairy, oils_fats, spices_herbs, condiments, pantry, other
+- Base servings: 4-6 people
+- Respect dietary restrictions
 
 Return ONLY valid JSON in this exact format:
 {
@@ -641,25 +772,20 @@ Return ONLY valid JSON in this exact format:
     {
       "group_name": "${group.group_name}",
       "meals": [
+        // GENERATE EXACTLY ${group.meals_to_generate} MEALS FOR THIS GROUP
         {
           "title": "Meal Name",
           "description": "Brief description",
           "prep_time": 15,
           "cook_time": 25,
           "servings": 4,
-          "ingredients": [
-            {
-              "name": "ingredient name",
-              "amount": 1.5,
-              "unit": "lbs",
-              "category": "protein"
-            }
-          ],
+          "ingredients": [{"name": "ingredient", "amount": 1.5, "unit": "lbs", "category": "protein"}],
           "instructions": ["Step 1", "Step 2"],
-          "tags": ["quick", "family-friendly"],
+          "tags": ["quick"],
           "dietary_info": ["vegetarian"],
           "difficulty": "easy"
         }
+        // ... continue with ${group.meals_to_generate - 1} more meals for "${group.group_name}"
       ]
     }`
   })
@@ -681,7 +807,7 @@ Return ONLY valid JSON in this exact format:
     
     console.log(`[MEAL_GEN] Making actual API call to ChatGPT`)
     console.log(`[MEAL_GEN] Request URL: https://api.openai.com/v1/chat/completions`)
-    console.log(`[MEAL_GEN] Using model: gpt-4`)
+    console.log(`[MEAL_GEN] Using model: gpt-4-turbo`)
     console.log(`[MEAL_GEN] Timeout: ${MEAL_GENERATION_CONFIG.TIMEOUT_MS}ms`)
     console.log(`[MEAL_GEN] Prompt length: ${prompt.length} characters`)
 
@@ -695,18 +821,18 @@ Return ONLY valid JSON in this exact format:
         'Authorization': `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY || process.env.OPENAI_API_KEY}`
       },
       body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4-turbo',
         messages: [
           {
             role: 'system',
-            content: 'You are a professional meal planning assistant. Generate meal suggestions that are practical, nutritious, and appropriate for the specified demographics and dietary restrictions. CRITICAL: You must return ONLY valid JSON with no additional text, markdown formatting, or explanations. The response must be parseable by JSON.parse().'
+            content: 'You are a meal planning assistant. Return ONLY valid JSON with no additional text. Use decimal numbers (0.5, 0.25) not fractions. Generate EXACTLY the specified number of meals for each group.'
           },
           {
             role: 'user',
             content: prompt
           }
         ],
-        max_tokens: 4000, // GPT-3.5-turbo max is 4096
+        max_tokens: 4096, // GPT-4-turbo maximum
         temperature: 0.7
       }),
       signal: AbortSignal.timeout(MEAL_GENERATION_CONFIG.TIMEOUT_MS)
@@ -751,6 +877,16 @@ Return ONLY valid JSON in this exact format:
         .replace(/,\s*}/g, '}') // Remove trailing commas
         .replace(/,\s*]/g, ']') // Remove trailing commas in arrays
         .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":') // Quote unquoted keys
+        // Convert common fractions to decimals
+        .replace(/:\s*1\/2\b/g, ': 0.5')
+        .replace(/:\s*1\/4\b/g, ': 0.25') 
+        .replace(/:\s*3\/4\b/g, ': 0.75')
+        .replace(/:\s*1\/3\b/g, ': 0.33')
+        .replace(/:\s*2\/3\b/g, ': 0.67')
+        .replace(/:\s*1\/8\b/g, ': 0.125')
+        .replace(/:\s*3\/8\b/g, ': 0.375')
+        .replace(/:\s*5\/8\b/g, ': 0.625')
+        .replace(/:\s*7\/8\b/g, ': 0.875')
       
       console.log(`[MEAL_GEN] Attempting to parse cleaned JSON (${cleanContent.length} chars)`)
       console.log(`[MEAL_GEN] First 200 chars: ${cleanContent.substring(0, 200)}`)
@@ -775,12 +911,35 @@ Return ONLY valid JSON in this exact format:
         
         if (startBrace !== -1 && lastBrace !== -1 && lastBrace > startBrace) {
           aggressiveClean = aggressiveClean.substring(startBrace, lastBrace + 1)
+          
+          // Apply fraction fixes to aggressive cleanup too
+          aggressiveClean = aggressiveClean
+            .replace(/:\s*1\/2\b/g, ': 0.5')
+            .replace(/:\s*1\/4\b/g, ': 0.25') 
+            .replace(/:\s*3\/4\b/g, ': 0.75')
+            .replace(/:\s*1\/3\b/g, ': 0.33')
+            .replace(/:\s*2\/3\b/g, ': 0.67')
+            .replace(/:\s*1\/8\b/g, ': 0.125')
+            .replace(/:\s*3\/8\b/g, ': 0.375')
+            .replace(/:\s*5\/8\b/g, ': 0.625')
+            .replace(/:\s*7\/8\b/g, ': 0.875')
+          
           console.log(`[MEAL_GEN] Trying aggressive cleanup: ${aggressiveClean.substring(0, 200)}...`)
           parsedResponse = JSON.parse(aggressiveClean)
         } else {
           throw parseError
         }
       } catch (secondaryError) {
+        // Log detailed information for debugging
+        console.error(`[MEAL_GEN] Combined request - Content length: ${content.length} characters`)
+        console.error(`[MEAL_GEN] Combined request - Last 200 chars: ${content.slice(-200)}`)
+        console.error(`[MEAL_GEN] Looking for incomplete JSON structure...`)
+        
+        // Check if the response was likely truncated
+        if (content.length > 15000 && !content.trim().endsWith('}')) {
+          throw new Error(`Response truncated at ${content.length} chars. Reduce meals per group or use individual group generation.`)
+        }
+        
         throw new Error(`Failed to parse ChatGPT response as JSON: ${parseError}`)
       }
     }
@@ -791,8 +950,10 @@ Return ONLY valid JSON in this exact format:
 
     // Convert to grouped meals
     const groupedMeals: Record<string, GeneratedMeal[]> = {}
+    console.log(`[DEBUG] ChatGPT response parsed successfully. Processing ${parsedResponse.groups.length} groups`)
 
     parsedResponse.groups.forEach(group => {
+      console.log(`[DEBUG] Processing group '${group.group_name}' - received ${group.meals?.length || 0} meals from ChatGPT`)
       const groupMeals: GeneratedMeal[] = group.meals.map((meal, index) => ({
         id: `meal-${Date.now()}-${group.group_name}-${index}`,
         title: meal.title,
@@ -826,6 +987,7 @@ Return ONLY valid JSON in this exact format:
         }
       })
 
+      console.log(`[DEBUG] Group '${group.group_name}': ${validMeals.length} valid meals after validation (started with ${groupMeals.length})`)
       if (validMeals.length > 0) {
         groupedMeals[group.group_name] = validMeals
       }
@@ -834,6 +996,9 @@ Return ONLY valid JSON in this exact format:
     if (Object.keys(groupedMeals).length === 0) {
       throw new Error('No valid meals were generated for any group')
     }
+
+    const totalParsedMeals = Object.values(groupedMeals).reduce((sum, groupMeals) => sum + groupMeals.length, 0)
+    console.log(`[DEBUG] Total parsed and validated meals from ChatGPT: ${totalParsedMeals}`)
 
     return groupedMeals
 
@@ -1020,11 +1185,16 @@ export function buildGroupContexts(
   planData: PlanData,
   availableGroups: StoredGroup[]
 ): GroupContext[] {
+  console.log(`[DEBUG] buildGroupContexts called with plan: ${planData.name}`)
+  console.log(`[DEBUG] planData.group_meals:`, planData.group_meals)
+  
   return planData.group_meals.map(groupMeal => {
     const group = availableGroups.find(g => g.id === groupMeal.group_id)
     if (!group) {
       throw new Error(`Group with id ${groupMeal.group_id} not found`)
     }
+
+    console.log(`[DEBUG] Processing group ${group.name} (${group.id}) - meal_count: ${groupMeal.meal_count}`)
 
     const demographics: Demographics = {
       adults: group.adults,
@@ -1035,7 +1205,7 @@ export function buildGroupContexts(
 
     const adult_equivalent = calculateAdultEquivalent(demographics)
 
-    return {
+    const context = {
       group_id: group.id,
       group_name: group.name,
       demographics,
@@ -1044,6 +1214,9 @@ export function buildGroupContexts(
       group_notes: groupMeal.notes,
       adult_equivalent
     }
+
+    console.log(`[DEBUG] Built context for ${group.name}: meal_count_requested = ${context.meal_count_requested}`)
+    return context
   })
 }
 
@@ -1053,9 +1226,11 @@ export function buildGroupContexts(
 function generateMockMealsForCombinedRequest(
   request: CombinedChatGPTMealRequest
 ): Record<string, GeneratedMeal[]> {
+  console.log(`[DEBUG] generateMockMealsForCombinedRequest called with ${request.groups.length} groups`)
   const mockMeals: Record<string, GeneratedMeal[]> = {}
   
   request.groups.forEach((group, groupIndex) => {
+    console.log(`[DEBUG] Processing group ${group.group_name}: generating ${group.meals_to_generate} meals`)
     const meals: GeneratedMeal[] = []
     
     for (let i = 0; i < group.meals_to_generate; i++) {
@@ -1078,8 +1253,12 @@ function generateMockMealsForCombinedRequest(
       meals.push(meal)
     }
     
+    console.log(`[DEBUG] Generated ${meals.length} meals for group ${group.group_name}`)
     mockMeals[group.group_name] = meals
   })
+  
+  const totalMeals = Object.values(mockMeals).reduce((sum, groupMeals) => sum + groupMeals.length, 0)
+  console.log(`[DEBUG] Total mock meals generated: ${totalMeals}`)
   
   return mockMeals
 }

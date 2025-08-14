@@ -306,10 +306,10 @@ async function processJobInBackground(
           group_name: groupName,
           title: meal.title,
           description: meal.description,
-          prep_time: meal.prep_time,
-          cook_time: meal.cook_time,
-          total_time: meal.total_time,
-          servings: meal.servings,
+          prep_time: Math.round(meal.prep_time), // Ensure integer
+          cook_time: Math.round(meal.cook_time), // Ensure integer
+          total_time: Math.round(meal.total_time), // Ensure integer
+          servings: Math.round(meal.servings), // Ensure integer
           ingredients: meal.ingredients,
           instructions: meal.instructions,
           tags: meal.tags,
@@ -458,10 +458,10 @@ async function processDevelopmentJobInBackground(
           group_name: groupName,
           title: meal.title,
           description: meal.description,
-          prep_time: meal.prep_time,
-          cook_time: meal.cook_time,
-          total_time: meal.total_time,
-          servings: meal.servings,
+          prep_time: Math.round(meal.prep_time), // Ensure integer
+          cook_time: Math.round(meal.cook_time), // Ensure integer
+          total_time: Math.round(meal.total_time), // Ensure integer
+          servings: Math.round(meal.servings), // Ensure integer
           ingredients: meal.ingredients,
           instructions: meal.instructions,
           tags: meal.tags,

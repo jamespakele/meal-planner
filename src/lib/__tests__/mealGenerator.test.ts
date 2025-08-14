@@ -419,10 +419,14 @@ describe('Meal Generator', () => {
     // Mock fetch for testing
     beforeEach(() => {
       global.fetch = jest.fn()
+      // Mock development mode to use mock meal generation
+      process.env.NODE_ENV = 'development'
+      delete process.env.OPENAI_API_KEY
     })
 
     afterEach(() => {
       jest.restoreAllMocks()
+      delete process.env.NODE_ENV
     })
 
     it('should return error when API calls fail', async () => {
@@ -499,6 +503,76 @@ describe('Meal Generator', () => {
       expect(expectedTotal).toBe(9)
     })
 
+    it('should generate 2 extra meals for each group (1 requested → 3 generated)', async () => {
+      // Test with 1 meal requested per group
+      const singleMealPlan: PlanData = {
+        ...mockPlanData,
+        group_meals: [
+          { group_id: 'group-1', meal_count: 1 }
+        ]
+      }
+      
+      const contexts = buildGroupContexts(singleMealPlan, mockGroups)
+      // Should be: 1 requested + 2 extra = 3 total to generate
+      const expectedMealsToGenerate = contexts[0].meal_count_requested + MEAL_GENERATION_CONFIG.DEFAULT_EXTRA_MEALS
+      expect(expectedMealsToGenerate).toBe(3)
+    })
+
+    it('should generate 2 extra meals for each group (2 requested → 4 generated)', async () => {
+      // Test with 2 meals requested per group
+      const twoMealPlan: PlanData = {
+        ...mockPlanData,
+        group_meals: [
+          { group_id: 'group-1', meal_count: 2 }
+        ]
+      }
+      
+      const contexts = buildGroupContexts(twoMealPlan, mockGroups)
+      // Should be: 2 requested + 2 extra = 4 total to generate
+      const expectedMealsToGenerate = contexts[0].meal_count_requested + MEAL_GENERATION_CONFIG.DEFAULT_EXTRA_MEALS
+      expect(expectedMealsToGenerate).toBe(4)
+    })
+
+    it('should generate 2 extra meals for each group (5 requested → 7 generated)', async () => {
+      // Test with 5 meals requested per group
+      const fiveMealPlan: PlanData = {
+        ...mockPlanData,
+        group_meals: [
+          { group_id: 'group-1', meal_count: 5 }
+        ]
+      }
+      
+      const contexts = buildGroupContexts(fiveMealPlan, mockGroups)
+      // Should be: 5 requested + 2 extra = 7 total to generate
+      const expectedMealsToGenerate = contexts[0].meal_count_requested + MEAL_GENERATION_CONFIG.DEFAULT_EXTRA_MEALS
+      expect(expectedMealsToGenerate).toBe(7)
+    })
+
+    it('should actually generate correct number of meals in mock mode', async () => {
+      // Test that mock generation produces the correct number of meals
+      const singleMealPlan: PlanData = {
+        ...mockPlanData,
+        group_meals: [
+          { group_id: 'group-1', meal_count: 1 }
+        ]
+      }
+      
+      // This should use mock generation since we're in development mode without API key
+      const result = await generateMealsForPlan(singleMealPlan, mockGroups)
+      
+      if (result.success && result.data) {
+        // Should generate 1 + 2 = 3 meals for the group
+        const groupMealOptions = result.data.group_meal_options
+        expect(groupMealOptions).toHaveLength(1) // One group
+        expect(groupMealOptions[0].generated_count).toBe(3) // 1 requested + 2 extra
+        expect(groupMealOptions[0].requested_count).toBe(1) // Original request
+      } else {
+        // If it failed, log the errors to help debug
+        console.log('Meal generation failed:', result.errors)
+        expect(result.success).toBe(true) // Force failure to see error message
+      }
+    }, 10000)
+
     it('should respect meal generation limits', async () => {
       const planWithTooManyMeals: PlanData = {
         ...mockPlanData,
@@ -518,6 +592,111 @@ describe('Meal Generator', () => {
       }
       expect(expectedMetadata.api_calls_made).toEqual(expect.any(Number))
     })
+
+    it('should generate correct meals for realistic scenario: kids(2), nuclear(1), wife(1), house(2)', async () => {
+      // This reproduces the user's specific bug report scenario
+      const realisticPlan: PlanData = {
+        name: 'Week of 2025-08-17',
+        week_start: '2025-08-17',
+        group_meals: [
+          { group_id: 'kids-group', meal_count: 2 },
+          { group_id: 'nuclear-family', meal_count: 1 },
+          { group_id: 'wife-only', meal_count: 1 },
+          { group_id: 'whole-house', meal_count: 2 }
+        ],
+        notes: 'Multi-group meal plan'
+      }
+
+      const realisticGroups: StoredGroup[] = [
+        {
+          id: 'kids-group',
+          name: 'Kids',
+          adults: 0,
+          teens: 0,
+          kids: 2,
+          toddlers: 1,
+          dietary_restrictions: [],
+          user_id: 'user-1',
+          status: 'active',
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z'
+        },
+        {
+          id: 'nuclear-family',
+          name: 'Nuclear Family',
+          adults: 2,
+          teens: 1,
+          kids: 2,
+          toddlers: 0,
+          dietary_restrictions: ['vegetarian'],
+          user_id: 'user-1',
+          status: 'active',
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z'
+        },
+        {
+          id: 'wife-only',
+          name: 'Wife Only',
+          adults: 1,
+          teens: 0,
+          kids: 0,
+          toddlers: 0,
+          dietary_restrictions: ['gluten-free'],
+          user_id: 'user-1',
+          status: 'active',
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z'
+        },
+        {
+          id: 'whole-house',
+          name: 'Whole House',
+          adults: 2,
+          teens: 1,
+          kids: 2,
+          toddlers: 1,
+          dietary_restrictions: [],
+          user_id: 'user-1',
+          status: 'active',
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z'
+        }
+      ]
+
+      // Use mock generation (development mode)
+      const result = await generateMealsForPlan(realisticPlan, realisticGroups)
+      
+      expect(result.success).toBe(true)
+      if (result.success && result.data) {
+        const groupMealOptions = result.data.group_meal_options
+        expect(groupMealOptions).toHaveLength(4)
+
+        // Find each group's results
+        const kidsResults = groupMealOptions.find(g => g.group_name === 'Kids')
+        const nuclearResults = groupMealOptions.find(g => g.group_name === 'Nuclear Family')
+        const wifeResults = groupMealOptions.find(g => g.group_name === 'Wife Only')
+        const houseResults = groupMealOptions.find(g => g.group_name === 'Whole House')
+
+        // Each group should get their requested count + 2 extra
+        expect(kidsResults?.generated_count).toBe(4)  // 2 + 2
+        expect(kidsResults?.requested_count).toBe(2)
+        
+        expect(nuclearResults?.generated_count).toBe(3)  // 1 + 2
+        expect(nuclearResults?.requested_count).toBe(1)
+        
+        expect(wifeResults?.generated_count).toBe(3)  // 1 + 2
+        expect(wifeResults?.requested_count).toBe(1)
+        
+        expect(houseResults?.generated_count).toBe(4)  // 2 + 2
+        expect(houseResults?.requested_count).toBe(2)
+
+        // Total should be 14 meals (4 + 3 + 3 + 4), not 8 (2 + 2 + 2 + 2)
+        const totalGenerated = groupMealOptions.reduce((sum, group) => sum + group.generated_count, 0)
+        expect(totalGenerated).toBe(14)
+      } else {
+        console.log('Realistic meal generation failed:', result.errors)
+        fail('Expected meal generation to succeed')
+      }
+    }, 10000)
   })
 
   describe('Integration scenarios', () => {

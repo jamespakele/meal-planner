@@ -28,8 +28,10 @@
       "Bash(rd:*)",
       "Bash(npx jest:*)",
       "Bash(npm run lint:*)",
-      "Bash(PORT=3000 npm run dev)"
-    ]
+      "Bash(PORT=3000 npm run dev)",
+      "Bash(grep:*)"
+    ],
+    "defaultMode": "acceptEdits"
   },
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [

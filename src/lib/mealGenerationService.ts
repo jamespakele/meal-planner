@@ -41,12 +41,12 @@ export async function generateMealsForPlan(
   planData: MealGenerationRequest
 ): Promise<MealGenerationResponse> {
   try {
-    const response = await fetch(`/api/plans/${planId}/generate-meals`, {
+    const response = await fetch(`/api/meal-generation/jobs`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(planData),
+      body: JSON.stringify({ planData }),
     })
 
     const data = await response.json()
