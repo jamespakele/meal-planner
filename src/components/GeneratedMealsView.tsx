@@ -148,6 +148,25 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
     }
   }
 
+  const parseGroupRequirements = () => {
+    if (!job?.groups_data) return {}
+    
+    const requirements: Record<string, number> = {}
+    try {
+      const groupsData = Array.isArray(job.groups_data) ? job.groups_data : []
+      groupsData.forEach((group: any) => {
+        if (group.group_id && typeof group.meals_to_generate === 'number') {
+          // Calculate original requirement: meals_to_generate = meal_count_requested + 2
+          const originalRequirement = Math.max(0, group.meals_to_generate - 2)
+          requirements[group.group_id] = originalRequirement
+        }
+      })
+    } catch (error) {
+      console.warn('Failed to parse group requirements:', error)
+    }
+    return requirements
+  }
+
   const getGroupsWithMeals = () => {
     const groupsMap = new Map<string, {
       id: string
@@ -155,7 +174,10 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
       meals: GeneratedMeal[]
       selectedCount: number
       totalCount: number
+      requiredCount: number
     }>()
+    
+    const requirements = parseGroupRequirements()
 
     meals.forEach(meal => {
       if (!groupsMap.has(meal.group_id)) {
@@ -164,7 +186,8 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
           name: meal.group_name,
           meals: [],
           selectedCount: 0,
-          totalCount: 0
+          totalCount: 0,
+          requiredCount: requirements[meal.group_id] || 0
         })
       }
       
@@ -236,6 +259,53 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
     }))
   }
 
+  const getSelectionStatus = (selectedCount: number, requiredCount: number) => {
+    if (requiredCount === 0) return 'neutral'
+    if (selectedCount === 0) return 'neutral'
+    if (selectedCount < requiredCount) return 'progress'
+    if (selectedCount === requiredCount) return 'complete'
+    return 'over'
+  }
+
+  const getSelectionInstruction = (selectedCount: number, requiredCount: number) => {
+    const status = getSelectionStatus(selectedCount, requiredCount)
+    
+    if (requiredCount === 0) {
+      return { text: 'Optional meals - select any you like', icon: '📄' }
+    }
+    
+    switch (status) {
+      case 'complete':
+        return { 
+          text: `✓ ${requiredCount} meal${requiredCount === 1 ? '' : 's'} selected (complete!)`, 
+          icon: '✅' 
+        }
+      case 'over':
+        return { 
+          text: `⚠ ${selectedCount} selected (only need ${requiredCount})`, 
+          icon: '⚠️' 
+        }
+      default:
+        return { 
+          text: `Select ${requiredCount} meal${requiredCount === 1 ? '' : 's'} for this group`, 
+          icon: '📋' 
+        }
+    }
+  }
+
+  const getStatusStyling = (status: string) => {
+    switch (status) {
+      case 'complete':
+        return 'bg-green-50 border-green-200 text-green-800'
+      case 'over':
+        return 'bg-orange-50 border-orange-200 text-orange-800'
+      case 'progress':
+        return 'bg-blue-50 border-blue-200 text-blue-800'
+      default:
+        return 'bg-gray-50 border-gray-200 text-gray-700'
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -283,6 +353,9 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
           <div className="space-y-6">
             {groupsWithMeals.map((group) => {
               const isCollapsed = collapsedGroups[group.id] || false
+              const status = getSelectionStatus(group.selectedCount, group.requiredCount)
+              const instruction = getSelectionInstruction(group.selectedCount, group.requiredCount)
+              const statusStyling = getStatusStyling(status)
               
               return (
                 <div key={group.id} className="bg-white shadow rounded-lg overflow-hidden">
@@ -292,6 +365,7 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
                     className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
                     aria-expanded={!isCollapsed}
                     aria-controls={`group-${group.id}-content`}
+                    aria-describedby={`group-${group.id}-instruction`}
                   >
                     <div className="flex items-center space-x-3">
                       <h2 className="text-xl font-semibold text-gray-900">{group.name}</h2>
@@ -310,6 +384,25 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                   </button>
+
+                  {/* Instruction Bar */}
+                  {!isCollapsed && (
+                    <div 
+                      id={`group-${group.id}-instruction`}
+                      className={`px-6 py-3 border-t border-gray-100 ${statusStyling} transition-colors`}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span className="text-lg" role="img" aria-hidden="true">
+                          {instruction.icon}
+                        </span>
+                        <span className="text-sm font-medium">
+                          {instruction.text}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   
                   {/* Group Content */}
                   <div

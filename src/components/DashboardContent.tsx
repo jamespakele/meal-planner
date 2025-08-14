@@ -11,7 +11,7 @@ import { getSupabaseClient } from '@/lib/supabase/singleton'
 
 export default function DashboardContent() {
   const { user, signOut } = useAuth()
-  const [activeTab, setActiveTab] = useState<'groups' | 'plans'>('groups')
+  const [activeTab, setActiveTab] = useState<'groups' | 'plans'>('plans')
   
   // Use singleton client to prevent per-render creation
   const supabase = useMemo(() => getSupabaseClient(), [])
@@ -19,10 +19,14 @@ export default function DashboardContent() {
   // Check URL hash on mount to set initial tab
   useEffect(() => {
     const hash = window.location.hash
-    if (hash === '#plans') {
-      setActiveTab('plans')
-    } else if (hash === '#groups') {
+    if (hash === '#groups') {
       setActiveTab('groups')
+    } else if (hash === '#plans') {
+      setActiveTab('plans')
+    } else {
+      // Default to plans if no hash is specified
+      setActiveTab('plans')
+      window.history.replaceState(null, '', '#plans')
     }
   }, [])
 
@@ -57,16 +61,6 @@ export default function DashboardContent() {
         <div className="border-b border-gray-200">
           <nav className="-mb-px flex space-x-8">
             <button
-              onClick={() => handleTabChange('groups')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'groups'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
-              }`}
-            >
-              Groups
-            </button>
-            <button
               onClick={() => handleTabChange('plans')}
               className={`py-2 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'plans'
@@ -76,14 +70,24 @@ export default function DashboardContent() {
             >
               Meal Plans
             </button>
+            <button
+              onClick={() => handleTabChange('groups')}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'groups'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
+              }`}
+            >
+              Groups
+            </button>
           </nav>
         </div>
       </div>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'groups' && <GroupsTab />}
         {activeTab === 'plans' && <PlansTab />}
+        {activeTab === 'groups' && <GroupsTab />}
       </main>
     </div>
   )
@@ -726,21 +730,28 @@ function PlansTab() {
       )}
 
       {noGroupsAvailable && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg className="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+          <div className="text-center">
+            <div className="mx-auto h-16 w-16 text-blue-500 mb-4">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
               </svg>
             </div>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-yellow-800">
-                No groups available
-              </h3>
-              <div className="mt-2 text-sm text-yellow-700">
-                <p>You need to create at least one group before you can create meal plans. Groups define who the meals are for and any dietary restrictions.</p>
-              </div>
-            </div>
+            <h3 className="text-xl font-semibold text-blue-900 mb-2">
+              Welcome to Meal Planning!
+            </h3>
+            <p className="text-blue-700 mb-6 max-w-md mx-auto">
+              To start generating personalized meal plans, you'll first need to define who you're cooking for. Groups help us understand dietary needs and portion sizes.
+            </p>
+            <button 
+              onClick={() => setActiveTab('groups')}
+              className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+            >
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Create Your First Group
+            </button>
           </div>
         </div>
       )}
@@ -755,30 +766,38 @@ function PlansTab() {
           </div>
         </div>
       ) : plans.length === 0 ? (
-        <div className="bg-white shadow overflow-hidden sm:rounded-md">
-          <div className="px-4 py-5 sm:p-6">
-            <div className="text-center py-12">
-              <div className="mx-auto h-12 w-12 text-gray-700">
+        <div className="bg-white shadow-lg rounded-lg overflow-hidden">
+          <div className="px-8 py-12">
+            <div className="text-center">
+              <div className="mx-auto h-16 w-16 text-green-500 mb-6">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                 </svg>
               </div>
-              <h3 className="mt-2 text-sm font-medium text-gray-900">No meal plans</h3>
-              <p className="mt-1 text-sm text-gray-800">
-                Get started by creating your first meal plan.
+              <h3 className="text-2xl font-bold text-gray-900 mb-3">Ready to Plan Your Meals!</h3>
+              <p className="text-gray-600 mb-8 max-w-lg mx-auto text-lg">
+                Create your first meal plan to get AI-powered meal suggestions tailored to your groups' preferences and dietary needs.
               </p>
-              <div className="mt-6">
+              <div className="space-y-4">
                 <button 
                   onClick={() => setShowCreateForm(true)}
                   disabled={noGroupsAvailable}
-                  className={`font-bold py-2 px-4 rounded ${
+                  className={`inline-flex items-center px-8 py-4 border border-transparent text-lg font-medium rounded-lg shadow-sm transition-colors ${
                     noGroupsAvailable
                       ? 'bg-gray-400 text-white cursor-not-allowed'
-                      : 'bg-green-500 hover:bg-green-700 text-white'
+                      : 'bg-green-600 hover:bg-green-700 text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500'
                   }`}
                 >
-                  {noGroupsAvailable ? 'Create Group First' : 'Create Plan'}
+                  <svg className="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  {noGroupsAvailable ? 'Create Group First' : 'Create Your First Meal Plan'}
                 </button>
+                {!noGroupsAvailable && (
+                  <p className="text-sm text-gray-500">
+                    You'll assign meals to your groups and get personalized recipe suggestions
+                  </p>
+                )}
               </div>
             </div>
           </div>
