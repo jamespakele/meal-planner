@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { createServerClient } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/server'
 import { validateFormLinkToken, successResponse, errorResponse } from '@/lib/utils'
 
 // POST /api/form-responses - Submit form response (public endpoint)
@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
       return errorResponse(tokenError || 'Invalid token', 401)
     }
     
-    const supabase = createServerClient()
+    const supabase = await createClient()
     
     // Submit the response
     const { data: response, error } = await supabase
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const supabase = createServerClient()
+    const supabase = await createClient()
     
     // Get all responses for the plan
     const { data: responses, error } = await supabase

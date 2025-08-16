@@ -1,18 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/server'
 import { validateGroup, sanitizeGroupName, GroupData } from '@/lib/groupValidation'
 
 // GET /api/groups - List user's groups
 export async function GET(request: NextRequest) {
   try {
-    // For MVP with mock auth, return empty array as success
-    // In production, this would connect to real Supabase with proper authentication
+    // Get authenticated user using cookie-based auth
+    const supabase = await createClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
     
-    // Mock data - in production this would come from Supabase
-    const mockGroups: any[] = []
+    if (authError || !user) {
+      console.error('Authentication error in groups API:', authError)
+      return NextResponse.json(
+        { success: false, error: 'Authentication required' },
+        { status: 401 }
+      )
+    }
+    
+    // Fetch user's groups from Supabase
+    const { data: groups, error: groupsError } = await supabase
+      .from('groups')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+    
+    if (groupsError) {
+      console.error('Error fetching groups:', groupsError)
+      return NextResponse.json(
+        { success: false, error: 'Failed to fetch groups' },
+        { status: 500 }
+      )
+    }
     
     return NextResponse.json(
-      { success: true, data: mockGroups },
+      { success: true, data: groups || [] },
       { status: 200 }
     )
 
@@ -28,6 +49,18 @@ export async function GET(request: NextRequest) {
 // POST /api/groups - Create new group
 export async function POST(request: NextRequest) {
   try {
+    // Get authenticated user using cookie-based auth
+    const supabase = await createClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    
+    if (authError || !user) {
+      console.error('Authentication error in groups API:', authError)
+      return NextResponse.json(
+        { success: false, error: 'Authentication required' },
+        { status: 401 }
+      )
+    }
+
     // Parse request body
     let body
     try {
@@ -73,19 +106,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // For MVP with mock auth, create mock response
-    // In production, this would insert into Supabase
-    const mockCreatedGroup = {
-      id: `group-${Date.now()}`,
-      ...groupData,
-      user_id: 'mock-user-123',
-      status: 'active',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    // Insert group into Supabase
+    const { data: createdGroup, error: insertError } = await supabase
+      .from('groups')
+      .insert({
+        ...groupData,
+        user_id: user.id
+      })
+      .select()
+      .single()
+
+    if (insertError) {
+      console.error('Error creating group:', insertError)
+      return NextResponse.json(
+        { success: false, error: 'Failed to create group' },
+        { status: 500 }
+      )
     }
 
     return NextResponse.json(
-      { success: true, data: mockCreatedGroup },
+      { success: true, data: createdGroup },
       { status: 201 }
     )
 

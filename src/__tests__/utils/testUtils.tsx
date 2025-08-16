@@ -1,6 +1,6 @@
 import React from 'react'
 import { render, RenderOptions } from '@testing-library/react'
-import { MockAuthProvider, MockUser } from '../components/MockAuthProvider'
+import { MockAuthProvider, MockUser } from '../../components/MockAuthProvider'
 
 // Mock user for testing
 export const mockUser: MockUser = {

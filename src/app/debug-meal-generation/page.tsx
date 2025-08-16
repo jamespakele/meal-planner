@@ -6,7 +6,7 @@ import { getSupabaseClient } from '@/lib/supabase/singleton'
 
 export default function DebugMealGenerationPage() {
   const { user } = useAuth()
-  const [groups, setGroups] = useState([])
+  const [groups, setGroups] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const supabase = useMemo(() => getSupabaseClient(), [])
   
@@ -14,7 +14,7 @@ export default function DebugMealGenerationPage() {
     name: 'Debug Test Plan',
     week_start: '2025-08-18',
     notes: 'Test notes for debugging meal generation',
-    group_meals: []
+    group_meals: [] as any[]
   })
 
   useEffect(() => {
@@ -59,7 +59,7 @@ export default function DebugMealGenerationPage() {
   
   const [generationContext, setGenerationContext] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [result, setResult] = useState(null)
+  const [result, setResult] = useState<any>(null)
 
   const buildGenerationPrompt = () => {
     const groupContexts = planData.group_meals.map(gm => {
@@ -89,14 +89,14 @@ export default function DebugMealGenerationPage() {
       plan_name: planData.name,
       week_start: planData.week_start,
       additional_notes: planData.notes,
-      groups: groupContexts.map(context => ({
-        group_id: context.group_id,
-        group_name: context.group_name,
-        demographics: context.demographics,
-        dietary_restrictions: context.dietary_restrictions,
-        meals_to_generate: context.meal_count_requested + 2, // DEFAULT_EXTRA_MEALS
-        group_notes: context.group_notes,
-        adult_equivalent: context.adult_equivalent
+      groups: groupContexts.filter(context => context !== null).map(context => ({
+        group_id: context!.group_id,
+        group_name: context!.group_name,
+        demographics: context!.demographics,
+        dietary_restrictions: context!.dietary_restrictions,
+        meals_to_generate: context!.meal_count_requested + 2, // DEFAULT_EXTRA_MEALS
+        group_notes: context!.group_notes,
+        adult_equivalent: context!.adult_equivalent
       }))
     }
 
@@ -144,7 +144,7 @@ Please respond with a JSON object where each group name is a key containing an a
       const data = await response.json()
       setResult(data)
     } catch (error) {
-      setResult({ error: error.message })
+      setResult({ error: error instanceof Error ? error.message : 'Unknown error' })
     } finally {
       setIsLoading(false)
     }
@@ -261,7 +261,7 @@ Please respond with a JSON object where each group name is a key containing an a
               <h2 className="text-xl font-semibold mb-4">OpenAI Prompt</h2>
               <div className="bg-blue-50 border border-blue-200 rounded p-4">
                 <p className="text-sm text-blue-800 mb-2">
-                  This is the exact prompt that would be sent to OpenAI's API:
+                  This is the exact prompt that would be sent to OpenAI&apos;s API:
                 </p>
                 <div className="bg-white p-4 rounded border text-sm font-mono whitespace-pre-wrap max-h-96 overflow-auto">
                   {prompt}

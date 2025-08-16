@@ -1,19 +1,20 @@
 import { NextRequest } from 'next/server'
-import { createServerClient } from '@/lib/supabase'
-import { getAuthenticatedUser, successResponse, errorResponse, calculateAdultEquivalent } from '@/lib/utils'
+import { createClient } from '@/lib/supabase/server'
+import { successResponse, errorResponse, calculateAdultEquivalent } from '@/lib/utils'
 
 // POST /api/plans/[id]/finalize - Finalize plan with conflict resolution
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { user, error: authError } = await getAuthenticatedUser(request)
-  
-  if (authError || !user) {
-    return errorResponse('Authentication required', 401)
-  }
-
   const { id: planId } = await params
 
   try {
-    const supabase = createServerClient()
+    // Get authenticated user using cookie-based auth
+    const supabase = await createClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    
+    if (authError || !user) {
+      console.error('Authentication error in finalize API:', authError)
+      return errorResponse('Authentication required', 401)
+    }
     
     // Verify user owns the plan
     const { data: plan, error: planError } = await supabase
@@ -130,7 +131,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
 // Helper function to generate shopping list
 async function generateShoppingList(planId: string, group: any) {
-  const supabase = createServerClient()
+  const supabase = await createClient()
   
   // Get all meals for the finalized plan
   const { data: planMeals, error } = await supabase

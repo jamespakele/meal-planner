@@ -65,7 +65,7 @@ jest.mock('../AuthProvider', () => ({
 // Mock meal generation progress
 jest.mock('../MealGenerationProgress', () => ({
   __esModule: true,
-  default: ({ onProgress }: { onProgress?: (progress: number) => void }) => {
+  default: function MockMealGenerationProgress({ onProgress }: { onProgress?: (progress: number) => void }) {
     React.useEffect(() => {
       if (onProgress) {
         // Simulate progress

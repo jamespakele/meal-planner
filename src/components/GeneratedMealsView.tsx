@@ -107,7 +107,7 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
       if (mealsData && mealsData.length > 0) {
         const initialCollapsedState: Record<string, boolean> = {}
         const uniqueGroups = mealsData.reduce((acc, meal) => {
-          if (!acc.find(g => g.id === meal.group_id)) {
+          if (!acc.find((g: any) => g.id === meal.group_id)) {
             acc.push({ id: meal.group_id, name: meal.group_name })
           }
           return acc

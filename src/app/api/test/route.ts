@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server'
-import { createServerClient } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/server'
 
 export async function GET() {
   try {
-    const supabase = createServerClient()
+    const supabase = await createClient()
     
     // Test database connection by counting meals
     const { data: meals, error } = await supabase

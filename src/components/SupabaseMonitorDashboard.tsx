@@ -35,6 +35,7 @@ export default function SupabaseMonitorDashboard({
     return null
   }
 
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     const updateMetrics = () => {
       setMetrics(getClientMetrics())

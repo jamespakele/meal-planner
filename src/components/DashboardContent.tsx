@@ -86,7 +86,7 @@ export default function DashboardContent() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'plans' && <PlansTab />}
+        {activeTab === 'plans' && <PlansTab handleTabChange={handleTabChange} />}
         {activeTab === 'groups' && <GroupsTab />}
       </main>
     </div>
@@ -365,7 +365,7 @@ function GroupsTab() {
   )
 }
 
-function PlansTab() {
+function PlansTab({ handleTabChange }: { handleTabChange: (tab: 'groups' | 'plans') => void }) {
   const { user } = useAuth()
   const [plans, setPlans] = useState<any[]>([])
   const [availableGroups, setAvailableGroups] = useState<any[]>([])
@@ -741,10 +741,10 @@ function PlansTab() {
               Welcome to Meal Planning!
             </h3>
             <p className="text-blue-700 mb-6 max-w-md mx-auto">
-              To start generating personalized meal plans, you'll first need to define who you're cooking for. Groups help us understand dietary needs and portion sizes.
+              To start generating personalized meal plans, you&apos;ll first need to define who you&apos;re cooking for. Groups help us understand dietary needs and portion sizes.
             </p>
             <button 
-              onClick={() => setActiveTab('groups')}
+              onClick={() => handleTabChange('groups')}
               className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
             >
               <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -776,7 +776,7 @@ function PlansTab() {
               </div>
               <h3 className="text-2xl font-bold text-gray-900 mb-3">Ready to Plan Your Meals!</h3>
               <p className="text-gray-600 mb-8 max-w-lg mx-auto text-lg">
-                Create your first meal plan to get AI-powered meal suggestions tailored to your groups' preferences and dietary needs.
+                Create your first meal plan to get AI-powered meal suggestions tailored to your groups&apos; preferences and dietary needs.
               </p>
               <div className="space-y-4">
                 <button 
@@ -795,7 +795,7 @@ function PlansTab() {
                 </button>
                 {!noGroupsAvailable && (
                   <p className="text-sm text-gray-500">
-                    You'll assign meals to your groups and get personalized recipe suggestions
+                    You&apos;ll assign meals to your groups and get personalized recipe suggestions
                   </p>
                 )}
               </div>
@@ -849,7 +849,7 @@ function PlansTab() {
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {groupMealsSummary.map((groupDetail, index) => (
+                            {groupMealsSummary.map((groupDetail: any, index: number) => (
                               <div key={index} className="bg-gray-50 rounded-md p-3">
                                 <div className="flex items-center justify-between">
                                   <span className="text-sm font-medium text-gray-900">
@@ -878,7 +878,7 @@ function PlansTab() {
                                   ⚠️ This plan uses outdated group references
                                 </p>
                                 <p className="text-xs text-orange-700 mt-1">
-                                  Click "Fix Group References" to update to current groups
+                                  Click &quot;Fix Group References&quot; to update to current groups
                                 </p>
                               </div>
                               <button

@@ -9,6 +9,10 @@
 
 # testing
 /coverage
+/.jest-cache/
+/node_modules/.cache/jest/
+jest-cache/
+*.test.js.snap
 
 # next.js
 /.next/

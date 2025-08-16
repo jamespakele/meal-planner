@@ -1,20 +1,18 @@
-import { createServerClient } from './supabase'
+import { createClient } from './supabase/server'
 import { NextRequest } from 'next/server'
 import crypto from 'crypto'
 
-// Get authenticated user from request
+// Get authenticated user from request using cookie-based auth
 export async function getAuthenticatedUser(request: NextRequest) {
   try {
-    const supabase = createServerClient()
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '')
+    const supabase = await createClient()
+    const { data: { user }, error } = await supabase.auth.getUser()
     
-    if (!token) {
-      return { user: null, error: 'No auth token provided' }
+    if (error || !user) {
+      return { user: null, error: error?.message || 'Authentication required' }
     }
-
-    const { data: { user }, error } = await supabase.auth.getUser(token)
     
-    return { user, error: error?.message || null }
+    return { user, error: null }
   } catch (error) {
     return { user: null, error: 'Authentication failed' }
   }
@@ -38,7 +36,7 @@ export function calculateAdultEquivalent(
 // Validate form link token
 export async function validateFormLinkToken(token: string) {
   try {
-    const supabase = createServerClient()
+    const supabase = await createClient()
     
     const { data: formLink, error } = await supabase
       .from('form_links')

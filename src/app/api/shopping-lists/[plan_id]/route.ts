@@ -1,22 +1,23 @@
 import { NextRequest } from 'next/server'
-import { createServerClient } from '@/lib/supabase'
-import { getAuthenticatedUser, successResponse, errorResponse } from '@/lib/utils'
+import { createClient } from '@/lib/supabase/server'
+import { successResponse, errorResponse } from '@/lib/utils'
 
 // GET /api/shopping-lists/[plan_id] - Get shopping list for a plan
 export async function GET(
   request: NextRequest, 
   { params }: { params: Promise<{ plan_id: string }> }
 ) {
-  const { user, error: authError } = await getAuthenticatedUser(request)
-  
-  if (authError || !user) {
-    return errorResponse('Authentication required', 401)
-  }
-
   const { plan_id: planId } = await params
 
   try {
-    const supabase = createServerClient()
+    // Get authenticated user using cookie-based auth
+    const supabase = await createClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    
+    if (authError || !user) {
+      console.error('Authentication error in shopping-lists API:', authError)
+      return errorResponse('Authentication required', 401)
+    }
     
     // Verify user owns the plan
     const { data: plan, error: planError } = await supabase

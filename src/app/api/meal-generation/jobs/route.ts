@@ -236,8 +236,9 @@ async function processJobInBackground(
 ) {
   console.log(`[BACKGROUND] Processing job ${jobId} for user ${userId}`)
   
+  const supabase = await createClient()
+  
   try {
-    const supabase = await createClient()
     console.log(`[BACKGROUND] Supabase client created successfully`)
     
     console.log(`[BACKGROUND] Updating job ${jobId} to processing status`)
