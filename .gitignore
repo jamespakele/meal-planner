@@ -46,4 +46,10 @@ next-env.d.ts
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Supabase
 SUPABASE_SETUP.md
+
+# git_ignore folder
+.git_ignore/
+
