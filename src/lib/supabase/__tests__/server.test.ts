@@ -16,9 +16,16 @@ jest.mock('@supabase/ssr', () => ({
 describe('Supabase Server Client', () => {
   let mockCookies: any
   let mockCreateServerClient: any
+  let originalEnvVars: { url?: string; key?: string }
 
   beforeEach(() => {
     jest.clearAllMocks()
+
+    // Backup original environment variables
+    originalEnvVars = {
+      url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+      key: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    }
 
     mockCookies = {
       get: jest.fn(),
@@ -29,6 +36,19 @@ describe('Supabase Server Client', () => {
     cookies.mockReturnValue(mockCookies)
 
     mockCreateServerClient = require('@supabase/ssr').createServerClient
+  })
+
+  afterEach(() => {
+    // Restore original environment variables
+    if (originalEnvVars.url) {
+      process.env.NEXT_PUBLIC_SUPABASE_URL = originalEnvVars.url
+    }
+    if (originalEnvVars.key) {
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = originalEnvVars.key
+    }
+    // Clear module cache to prevent issues with doMock
+    jest.clearAllMocks()
+    jest.resetModules()
   })
 
   describe('Dependency Resolution', () => {

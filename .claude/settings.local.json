@@ -30,7 +30,11 @@
       "Bash(npm run lint:*)",
       "Bash(PORT=3000 npm run dev)",
       "Bash(grep:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(wsl:*)",
+      "Bash(set -a)",
+      "Bash(source:*)",
+      "Bash(touch:*)"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [

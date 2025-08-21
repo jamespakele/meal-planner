@@ -79,7 +79,7 @@ Each component will be testable in isolation, designed for reusability, and inte
 - Input: Participant opens a FormLink
 - Process:
   - Loads available meals
-  - Captures selections
+  - Captures selectionsW
   - Stores `FormResponse` with associated role
 - Conflict Rule: Co‑manager overrides conflicting participant choices
 

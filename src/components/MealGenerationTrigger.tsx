@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useMealGenerationProgress } from '@/hooks/useMealGenerationProgress'
 import { generateMealsForPlan } from '@/lib/mealGenerationService'
 
@@ -22,6 +22,7 @@ interface MealGenerationTriggerProps {
 
 export default function MealGenerationTrigger({ plan, onSuccess, onError }: MealGenerationTriggerProps) {
   const [localError, setLocalError] = useState<string | null>(null)
+  const hasTriggeredSuccessRef = useRef(false)
 
   // Calculate if the plan is ready for generation
   const canGenerate = plan && 
@@ -62,7 +63,8 @@ export default function MealGenerationTrigger({ plan, onSuccess, onError }: Meal
 
   // Handle success callback when status changes to completed
   useEffect(() => {
-    if (status === 'completed' && totalMeals !== null) {
+    if (status === 'completed' && totalMeals !== null && !hasTriggeredSuccessRef.current) {
+      hasTriggeredSuccessRef.current = true
       onSuccess(plan?.id || '', totalMeals)
     }
   }, [status, totalMeals, plan?.id, onSuccess])
@@ -75,6 +77,7 @@ export default function MealGenerationTrigger({ plan, onSuccess, onError }: Meal
 
     console.log('Starting meal generation for plan:', plan.id)
     setLocalError(null)
+    hasTriggeredSuccessRef.current = false // Reset the success guard
 
     // Stop any existing polling first
     stopPolling()
@@ -105,12 +108,14 @@ export default function MealGenerationTrigger({ plan, onSuccess, onError }: Meal
   const handleRetry = () => {
     reset()
     setLocalError(null)
+    hasTriggeredSuccessRef.current = false // Reset the success guard
     handleGenerate()
   }
 
   const handleGenerateAgain = () => {
     reset()
     setLocalError(null)
+    hasTriggeredSuccessRef.current = false // Reset the success guard
   }
 
   // Handle edge cases
@@ -270,15 +275,15 @@ export default function MealGenerationTrigger({ plan, onSuccess, onError }: Meal
     <div className="text-center py-4">
       <button
         onClick={handleGenerate}
-        disabled={status === 'processing' || status === 'pending'}
+        disabled={status !== 'idle'}
         className={`font-bold py-2 px-4 rounded transition-colors ${
-          status === 'processing' || status === 'pending'
+          status !== 'idle'
             ? 'bg-gray-400 text-white cursor-not-allowed'
             : 'bg-green-500 hover:bg-green-700 text-white'
         }`}
         aria-describedby="generation-description"
       >
-        {status === 'processing' || status === 'pending' 
+        {status !== 'idle'
           ? 'Generating...' 
           : `Generate Meals for ${plan.name}`
         } (Status: {status})

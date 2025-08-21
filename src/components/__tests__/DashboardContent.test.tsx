@@ -280,9 +280,9 @@ describe('DashboardContent - Plans as Primary Screen', () => {
       render(<DashboardContent />)
       
       await waitFor(() => {
-        expect(screen.getByText('Ready to Plan Your Meals!')).toBeInTheDocument()
-        expect(screen.getByText(/Create your first meal plan to get AI-powered/)).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: /Create Your First Meal Plan/i })).toBeInTheDocument()
+        expect(screen.getByText('No meal plans')).toBeInTheDocument()
+        expect(screen.getByText(/Get started by creating your first meal plan/)).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Create Meal Plan/i })).toBeInTheDocument()
       })
     })
 

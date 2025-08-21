@@ -1,10 +1,11 @@
 'use client'
 
 import { useAuth } from './AuthProvider'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import GroupForm from './GroupForm'
 import PlanForm from './PlanForm'
 import MealGenerationTrigger from './MealGenerationTrigger'
+import FormLinkManager from './FormLinkManager'
 import { GroupData } from '@/lib/groupValidation'
 import { PlanData } from '@/lib/planValidation'
 import { getSupabaseClient } from '@/lib/supabase/singleton'
@@ -204,18 +205,21 @@ function GroupsTab() {
     }
 
     try {
-      const { error } = await supabase
-        .from('groups')
-        .update({ status: 'deleted' })
-        .eq('id', groupId)
+      const response = await fetch(`/api/groups?id=${groupId}`, {
+        method: 'DELETE'
+      })
 
-      if (error) throw error
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to delete group')
+      }
 
       setGroups(groups.filter(g => g.id !== groupId))
       setError(null)
     } catch (error) {
       console.error('Error deleting group:', error)
-      setError('Failed to delete group')
+      setError(error instanceof Error ? error.message : 'Failed to delete group')
     }
   }
 
@@ -374,40 +378,27 @@ function PlansTab({ handleTabChange }: { handleTabChange: (tab: 'groups' | 'plan
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [editingPlan, setEditingPlan] = useState<any | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [mealGenerationInProgress, setMealGenerationInProgress] = useState(false)
 
   // Use singleton client to prevent per-render creation
   const supabase = useMemo(() => getSupabaseClient(), [])
 
-  useEffect(() => {
-    if (user) {
-      loadGroups()
-      loadPlans()
-    }
-  }, [user])
-
-  useEffect(() => {
-    if (plans.length > 0) {
-      checkGeneratedMealsForPlans()
-    }
-  }, [plans])
-
   const loadPlans = async () => {
     try {
       setLoading(true)
-      const { data: plans, error } = await supabase
-        .from('meal_plans')
-        .select('*')
-        .eq('user_id', user?.id)
-        .eq('status', 'active')
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
+      const response = await fetch('/api/plans')
       
-      setPlans(plans || [])
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to load plans')
+      }
+      
+      const data = await response.json()
+      setPlans(data.plans || [])
       setError(null)
     } catch (error) {
       console.error('Error loading plans:', error)
-      setError('Failed to load plans')
+      setError(error instanceof Error ? error.message : 'Failed to load plans')
     } finally {
       setLoading(false)
     }
@@ -432,49 +423,52 @@ function PlansTab({ handleTabChange }: { handleTabChange: (tab: 'groups' | 'plan
     }
   }
 
-  const checkGeneratedMealsForPlans = async () => {
+  const checkGeneratedMealsForPlans = useCallback(async () => {
     try {
       const mealsStatus: Record<string, { hasGeneratedMeals: boolean, jobId: string | null }> = {}
 
-      // For each plan, check if there are generated meals
-      for (const plan of plans) {
-        // First, try to find a job for this plan by checking meal_generation_jobs table
-        const { data: jobs, error: jobError } = await supabase
-          .from('meal_generation_jobs')
-          .select('id, status')
-          .eq('user_id', user?.id)
-          .eq('plan_name', plan.name)
-          .eq('week_start', plan.week_start)
-          .eq('status', 'completed')
-          .order('created_at', { ascending: false })
-          .limit(1)
+      // Defensive check: ensure plans exist and are not empty
+      if (!plans || plans.length === 0) {
+        console.log('No plans available for meal status check')
+        return
+      }
 
-        if (jobError) {
-          console.error('Error checking jobs for plan:', plan.id, jobError)
-          mealsStatus[plan.id] = { hasGeneratedMeals: false, jobId: null }
+      // For each plan, check if there are generated meals using API route
+      for (const plan of plans) {
+        // Defensive check: ensure plan has required properties
+        if (!plan || !plan.id || !plan.name) {
+          console.warn('Skipping invalid plan:', plan)
           continue
         }
 
-        if (jobs && jobs.length > 0) {
-          const jobId = jobs[0].id
-
-          // Check if this job has generated meals
-          const { data: meals, error: mealsError } = await supabase
-            .from('generated_meals')
-            .select('id')
-            .eq('job_id', jobId)
-            .limit(1)
-
-          if (mealsError) {
-            console.error('Error checking meals for job:', jobId, mealsError)
+        try {
+          const response = await fetch(`/api/meal-generation/status?planId=${encodeURIComponent(plan.name)}`)
+          
+          if (!response.ok) {
+            console.error('Error checking meal generation status for plan:', plan.id, response.statusText)
             mealsStatus[plan.id] = { hasGeneratedMeals: false, jobId: null }
-          } else {
-            mealsStatus[plan.id] = {
-              hasGeneratedMeals: meals && meals.length > 0,
-              jobId: meals && meals.length > 0 ? jobId : null
-            }
+            continue
           }
-        } else {
+
+          const data = await response.json()
+          
+          if (!data.success) {
+            console.error('API error checking meal generation status for plan:', plan.id, data.error)
+            mealsStatus[plan.id] = { hasGeneratedMeals: false, jobId: null }
+            continue
+          }
+
+          // Check if there are completed jobs with meals
+          const completedJobs = data.data.jobs.filter((job: any) => job.status === 'completed')
+          const hasGeneratedMeals = completedJobs.length > 0 && data.data.meals.length > 0
+          const jobId = hasGeneratedMeals && completedJobs.length > 0 ? completedJobs[0].id : null
+
+          mealsStatus[plan.id] = {
+            hasGeneratedMeals,
+            jobId
+          }
+        } catch (error) {
+          console.error('Error checking meal generation status for plan:', plan.id, error)
           mealsStatus[plan.id] = { hasGeneratedMeals: false, jobId: null }
         }
       }
@@ -483,7 +477,20 @@ function PlansTab({ handleTabChange }: { handleTabChange: (tab: 'groups' | 'plan
     } catch (error) {
       console.error('Error checking generated meals for plans:', error)
     }
-  }
+  }, [plans])
+
+  useEffect(() => {
+    if (user) {
+      loadGroups()
+      loadPlans()
+    }
+  }, [user])
+
+  useEffect(() => {
+    if (plans.length > 0) {
+      checkGeneratedMealsForPlans()
+    }
+  }, [plans, checkGeneratedMealsForPlans])
 
   const handleCreatePlan = async (data: PlanData, planId?: string) => {
     try {
@@ -542,18 +549,21 @@ function PlansTab({ handleTabChange }: { handleTabChange: (tab: 'groups' | 'plan
     }
 
     try {
-      const { error } = await supabase
-        .from('meal_plans')
-        .update({ status: 'deleted' })
-        .eq('id', planId)
+      const response = await fetch(`/api/plans?id=${planId}`, {
+        method: 'DELETE'
+      })
 
-      if (error) throw error
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to delete plan')
+      }
 
       setPlans(plans.filter(p => p.id !== planId))
       setError(null)
     } catch (error) {
       console.error('Error deleting plan:', error)
-      setError('Failed to delete plan')
+      setError(error instanceof Error ? error.message : 'Failed to delete plan')
     }
   }
 
@@ -563,12 +573,12 @@ function PlansTab({ handleTabChange }: { handleTabChange: (tab: 'groups' | 'plan
     setError(null)
   }
 
-  const handleMealGenerationSuccess = (planId: string, totalMeals: number) => {
+  const handleMealGenerationSuccess = useCallback((planId: string, totalMeals: number) => {
     // You could add a success notification here
     console.log(`Successfully generated ${totalMeals} meals for plan ${planId}`)
     // Refresh the meal status to show the new "View Generated Meals" button
     checkGeneratedMealsForPlans()
-  }
+  }, [checkGeneratedMealsForPlans])
 
   const handleMealGenerationError = (error: string) => {
     setError(`Meal generation failed: ${error}`)
@@ -765,39 +775,26 @@ function PlansTab({ handleTabChange }: { handleTabChange: (tab: 'groups' | 'plan
             </div>
           </div>
         </div>
-      ) : plans.length === 0 ? (
-        <div className="bg-white shadow-lg rounded-lg overflow-hidden">
-          <div className="px-8 py-12">
-            <div className="text-center">
-              <div className="mx-auto h-16 w-16 text-green-500 mb-6">
+      ) : plans.length === 0 && !noGroupsAvailable ? (
+        <div className="bg-white shadow overflow-hidden sm:rounded-md">
+          <div className="px-4 py-5 sm:p-6">
+            <div className="text-center py-12">
+              <div className="mx-auto h-12 w-12 text-gray-400">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                 </svg>
               </div>
-              <h3 className="text-2xl font-bold text-gray-900 mb-3">Ready to Plan Your Meals!</h3>
-              <p className="text-gray-600 mb-8 max-w-lg mx-auto text-lg">
-                Create your first meal plan to get AI-powered meal suggestions tailored to your groups&apos; preferences and dietary needs.
+              <h3 className="mt-2 text-sm font-medium text-gray-900">No meal plans</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Get started by creating your first meal plan.
               </p>
-              <div className="space-y-4">
+              <div className="mt-6">
                 <button 
                   onClick={() => setShowCreateForm(true)}
-                  disabled={noGroupsAvailable}
-                  className={`inline-flex items-center px-8 py-4 border border-transparent text-lg font-medium rounded-lg shadow-sm transition-colors ${
-                    noGroupsAvailable
-                      ? 'bg-gray-400 text-white cursor-not-allowed'
-                      : 'bg-green-600 hover:bg-green-700 text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500'
-                  }`}
+                  className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
                 >
-                  <svg className="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  {noGroupsAvailable ? 'Create Group First' : 'Create Your First Meal Plan'}
+                  Create Meal Plan
                 </button>
-                {!noGroupsAvailable && (
-                  <p className="text-sm text-gray-500">
-                    You&apos;ll assign meals to your groups and get personalized recipe suggestions
-                  </p>
-                )}
               </div>
             </div>
           </div>
@@ -921,6 +918,10 @@ function PlansTab({ handleTabChange }: { handleTabChange: (tab: 'groups' | 'plan
                               View Generated Meals
                             </a>
                           )}
+                          <FormLinkManager 
+                            planId={plan.id} 
+                            planName={plan.name}
+                          />
                           <button
                             onClick={() => setEditingPlan(plan)}
                             className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded"

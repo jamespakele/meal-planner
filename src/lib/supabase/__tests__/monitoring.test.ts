@@ -38,10 +38,12 @@ Object.defineProperty(global, 'process', {
 })
 
 // Mock window for browser environment tests
-Object.defineProperty(global, 'window', {
-  value: undefined,
-  configurable: true
-})
+if (typeof window === 'undefined') {
+  Object.defineProperty(global, 'window', {
+    value: undefined,
+    configurable: true
+  })
+}
 
 describe('Supabase Client Monitoring System', () => {
   beforeEach(() => {

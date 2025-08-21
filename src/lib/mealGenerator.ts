@@ -235,16 +235,26 @@ export async function generateMealsForPlan(
       }
     }
 
+    // Check if any meals are requested
+    const totalMealsRequested = groupContexts.reduce((sum, ctx) => sum + ctx.meal_count_requested, 0)
+    if (totalMealsRequested === 0) {
+      return {
+        success: false,
+        errors: [{
+          code: 'NO_MEALS_REQUESTED',
+          message: 'No meals requested for any group in this plan'
+        }]
+      }
+    }
+
     // Check if we should use combined approach or individual calls
     const totalMealsToGenerate = groupContexts.reduce((sum, context) => 
       sum + (context.meal_count_requested + MEAL_GENERATION_CONFIG.DEFAULT_EXTRA_MEALS), 0
     )
     
-    console.log(`[DEBUG] Total meals to generate: ${totalMealsToGenerate}`)
     
     // If generating more than 12 meals total, use individual group approach to avoid token limits
     if (totalMealsToGenerate > 12 || groupContexts.length > 3) {
-      console.log(`[DEBUG] Using individual group generation (${totalMealsToGenerate} meals, ${groupContexts.length} groups)`)
       return await generateMealsForPlanIndividually(planData, availableGroups, groupContexts, startTime, errors, totalApiCalls, totalTokens)
     }
 
@@ -255,7 +265,6 @@ export async function generateMealsForPlan(
       additional_notes: planData.notes,
       groups: groupContexts.map(context => {
         const mealsToGenerate = context.meal_count_requested + MEAL_GENERATION_CONFIG.DEFAULT_EXTRA_MEALS
-        console.log(`[DEBUG] Calculating meals for ${context.group_name}: ${context.meal_count_requested} requested + ${MEAL_GENERATION_CONFIG.DEFAULT_EXTRA_MEALS} extra = ${mealsToGenerate} total`)
         
         // Check limits per group
         if (mealsToGenerate > MEAL_GENERATION_CONFIG.MAX_MEALS_PER_GROUP) {
@@ -275,7 +284,6 @@ export async function generateMealsForPlan(
           adult_equivalent: context.adult_equivalent
         }
 
-        console.log(`[DEBUG] Final group request for ${context.group_name}:`, { meals_to_generate: groupRequest.meals_to_generate })
         return groupRequest
       })
     }
@@ -305,7 +313,6 @@ export async function generateMealsForPlan(
         totalApiCalls++
       } catch (error) {
         retryCount++
-        console.warn(`Combined meal generation attempt ${retryCount} failed:`, error)
         
         if (retryCount >= MEAL_GENERATION_CONFIG.MAX_RETRIES) {
           errors.push({
@@ -470,7 +477,7 @@ Return ONLY valid JSON in this exact format:
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY || process.env.OPENAI_API_KEY}`
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY}`
       },
       body: JSON.stringify({
         model: 'gpt-4-turbo',
@@ -521,7 +528,6 @@ Return ONLY valid JSON in this exact format:
       
       parsedResponse = JSON.parse(cleanContent)
     } catch (parseError) {
-      console.error(`[MEAL_GEN] JSON parsing failed. Original content:`, content)
       
       // Try one more aggressive cleaning attempt
       try {
@@ -549,7 +555,7 @@ Return ONLY valid JSON in this exact format:
         console.error(`[MEAL_GEN] Looking for incomplete JSON structure...`)
         
         // Check if the response was likely truncated
-        if (content.length > 15000 && !content.trim().endsWith('}')) {
+        if (!content.trim().endsWith('}') && content.includes('"meals"')) {
           throw new Error(`ChatGPT response appears to be truncated (${content.length} chars). Try reducing the number of meals or groups, or increase API timeout.`)
         }
         
@@ -562,27 +568,37 @@ Return ONLY valid JSON in this exact format:
     }
 
     // Convert ChatGPT response to GeneratedMeal objects
-    const generatedMeals: GeneratedMeal[] = parsedResponse.meals.map((meal, index) => ({
-      id: `meal-${Date.now()}-${index}`,
-      title: meal.title,
-      description: meal.description,
-      prep_time: meal.prep_time,
-      cook_time: meal.cook_time,
-      total_time: meal.prep_time + meal.cook_time,
-      servings: meal.servings,
-      ingredients: meal.ingredients.map(ing => ({
-        name: ing.name,
-        amount: ing.amount,
-        unit: ing.unit,
-        category: ing.category
-      })),
-      instructions: meal.instructions,
-      tags: meal.tags,
-      dietary_info: meal.dietary_info,
-      difficulty: meal.difficulty as 'easy' | 'medium' | 'hard',
-      group_id: request.group_name, // Using group_name as identifier for now
-      created_at: new Date().toISOString()
-    }))
+    const generatedMeals: GeneratedMeal[] = parsedResponse.meals
+      .filter(meal => {
+        // Basic validation to avoid errors during conversion
+        return meal && 
+               typeof meal.title === 'string' &&
+               typeof meal.prep_time === 'number' &&
+               typeof meal.cook_time === 'number' &&
+               Array.isArray(meal.ingredients) &&
+               Array.isArray(meal.instructions)
+      })
+      .map((meal, index) => ({
+        id: `meal-${Date.now()}-${index}`,
+        title: meal.title,
+        description: meal.description,
+        prep_time: meal.prep_time,
+        cook_time: meal.cook_time,
+        total_time: meal.prep_time + meal.cook_time,
+        servings: meal.servings,
+        ingredients: meal.ingredients?.map(ing => ({
+          name: ing.name,
+          amount: ing.amount,
+          unit: ing.unit,
+          category: ing.category
+        })) || [],
+        instructions: meal.instructions,
+        tags: meal.tags || [],
+        dietary_info: meal.dietary_info || [],
+        difficulty: meal.difficulty as 'easy' | 'medium' | 'hard',
+        group_id: request.group_name, // Using group_name as identifier for now
+        created_at: new Date().toISOString()
+      }))
 
     // Validate each generated meal
     const validMeals: GeneratedMeal[] = []
@@ -591,7 +607,6 @@ Return ONLY valid JSON in this exact format:
       if (isValid) {
         validMeals.push(meal)
       } else {
-        console.warn('Invalid meal generated:', (meal as any)?.title || 'Unknown')
       }
     })
 
@@ -603,6 +618,10 @@ Return ONLY valid JSON in this exact format:
 
   } catch (error) {
     if (error instanceof Error) {
+      // Improve error handling for specific cases
+      if (error.name === 'AbortError' || error.message.includes('aborted')) {
+        throw new Error('Request timed out - try reducing the number of meals or groups')
+      }
       throw new Error(`Meal generation failed: ${error.message}`)
     }
     throw new Error('Meal generation failed with unknown error')
@@ -626,7 +645,6 @@ async function generateMealsForPlanIndividually(
   // Generate meals for each group individually
   for (const context of groupContexts) {
     try {
-      console.log(`[DEBUG] Generating meals individually for ${context.group_name}`)
       
       const individualRequest: ChatGPTMealRequest = {
         group_name: context.group_name,
@@ -656,10 +674,8 @@ async function generateMealsForPlanIndividually(
           total_servings_needed: totalServingsNeeded
         })
 
-        console.log(`[DEBUG] Successfully generated ${groupMeals.length} meals for ${context.group_name}`)
       }
     } catch (error) {
-      console.error(`[DEBUG] Failed to generate meals for ${context.group_name}:`, error)
       errors.push({
         code: 'GROUP_GENERATION_FAILED',
         message: `Failed to generate meals for ${context.group_name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -796,20 +812,11 @@ Return ONLY valid JSON in this exact format:
 
   try {
     // Development mode: Use mock data instead of actual API call
-    console.log(`[MEAL_GEN] NODE_ENV: ${process.env.NODE_ENV}, OPENAI_API_KEY exists: ${!!process.env.OPENAI_API_KEY}`)
-    console.log(`[MEAL_GEN] OPENAI_API_KEY length: ${process.env.OPENAI_API_KEY?.length || 0}`)
-    console.log(`[MEAL_GEN] OPENAI_API_KEY starts with: ${process.env.OPENAI_API_KEY?.substring(0, 10)}...`)
     
     if (process.env.NODE_ENV === 'development' && !process.env.OPENAI_API_KEY) {
-      console.log(`[MEAL_GEN] Using mock data for development mode`)
       return generateMockMealsForCombinedRequest(request)
     }
     
-    console.log(`[MEAL_GEN] Making actual API call to ChatGPT`)
-    console.log(`[MEAL_GEN] Request URL: https://api.openai.com/v1/chat/completions`)
-    console.log(`[MEAL_GEN] Using model: gpt-4-turbo`)
-    console.log(`[MEAL_GEN] Timeout: ${MEAL_GENERATION_CONFIG.TIMEOUT_MS}ms`)
-    console.log(`[MEAL_GEN] Prompt length: ${prompt.length} characters`)
 
     // Make API call to OpenAI
     let response
@@ -818,7 +825,7 @@ Return ONLY valid JSON in this exact format:
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY || process.env.OPENAI_API_KEY}`
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY}`
       },
       body: JSON.stringify({
         model: 'gpt-4-turbo',
@@ -838,16 +845,13 @@ Return ONLY valid JSON in this exact format:
       signal: AbortSignal.timeout(MEAL_GENERATION_CONFIG.TIMEOUT_MS)
     })
 
-      console.log(`[MEAL_GEN] API Response received - Status: ${response.status} ${response.statusText}`)
 
       if (!response.ok) {
         const errorText = await response.text()
-        console.error(`[MEAL_GEN] API Error Response:`, errorText)
         throw new Error(`ChatGPT API error: ${response.status} ${response.statusText} - ${errorText}`)
       }
     } catch (fetchError) {
-      console.error(`[MEAL_GEN] Fetch failed:`, fetchError)
-      if (fetchError.name === 'AbortError' || fetchError.message.includes('aborted')) {
+      if (fetchError instanceof Error && (fetchError.name === 'AbortError' || fetchError.message.includes('aborted'))) {
         throw new Error('Request timed out - try reducing the number of meals or groups')
       }
       throw fetchError
@@ -888,13 +892,9 @@ Return ONLY valid JSON in this exact format:
         .replace(/:\s*5\/8\b/g, ': 0.625')
         .replace(/:\s*7\/8\b/g, ': 0.875')
       
-      console.log(`[MEAL_GEN] Attempting to parse cleaned JSON (${cleanContent.length} chars)`)
-      console.log(`[MEAL_GEN] First 200 chars: ${cleanContent.substring(0, 200)}`)
       
       parsedResponse = JSON.parse(cleanContent)
     } catch (parseError) {
-      console.error(`[MEAL_GEN] JSON parsing failed. Original content:`, content)
-      console.error(`[MEAL_GEN] Parse error:`, parseError)
       
       // Try one more aggressive cleaning attempt
       try {
@@ -924,7 +924,6 @@ Return ONLY valid JSON in this exact format:
             .replace(/:\s*5\/8\b/g, ': 0.625')
             .replace(/:\s*7\/8\b/g, ': 0.875')
           
-          console.log(`[MEAL_GEN] Trying aggressive cleanup: ${aggressiveClean.substring(0, 200)}...`)
           parsedResponse = JSON.parse(aggressiveClean)
         } else {
           throw parseError
@@ -950,10 +949,8 @@ Return ONLY valid JSON in this exact format:
 
     // Convert to grouped meals
     const groupedMeals: Record<string, GeneratedMeal[]> = {}
-    console.log(`[DEBUG] ChatGPT response parsed successfully. Processing ${parsedResponse.groups.length} groups`)
 
     parsedResponse.groups.forEach(group => {
-      console.log(`[DEBUG] Processing group '${group.group_name}' - received ${group.meals?.length || 0} meals from ChatGPT`)
       const groupMeals: GeneratedMeal[] = group.meals.map((meal, index) => ({
         id: `meal-${Date.now()}-${group.group_name}-${index}`,
         title: meal.title,
@@ -983,11 +980,9 @@ Return ONLY valid JSON in this exact format:
         if (isValid) {
           validMeals.push(meal)
         } else {
-          console.warn('Invalid meal generated:', (meal as any)?.title || 'Unknown')
-        }
+          }
       })
 
-      console.log(`[DEBUG] Group '${group.group_name}': ${validMeals.length} valid meals after validation (started with ${groupMeals.length})`)
       if (validMeals.length > 0) {
         groupedMeals[group.group_name] = validMeals
       }
@@ -998,7 +993,6 @@ Return ONLY valid JSON in this exact format:
     }
 
     const totalParsedMeals = Object.values(groupedMeals).reduce((sum, groupMeals) => sum + groupMeals.length, 0)
-    console.log(`[DEBUG] Total parsed and validated meals from ChatGPT: ${totalParsedMeals}`)
 
     return groupedMeals
 
@@ -1185,16 +1179,11 @@ export function buildGroupContexts(
   planData: PlanData,
   availableGroups: StoredGroup[]
 ): GroupContext[] {
-  console.log(`[DEBUG] buildGroupContexts called with plan: ${planData.name}`)
-  console.log(`[DEBUG] planData.group_meals:`, planData.group_meals)
-  
   return planData.group_meals.map(groupMeal => {
     const group = availableGroups.find(g => g.id === groupMeal.group_id)
     if (!group) {
       throw new Error(`Group with id ${groupMeal.group_id} not found`)
     }
-
-    console.log(`[DEBUG] Processing group ${group.name} (${group.id}) - meal_count: ${groupMeal.meal_count}`)
 
     const demographics: Demographics = {
       adults: group.adults,
@@ -1215,7 +1204,6 @@ export function buildGroupContexts(
       adult_equivalent
     }
 
-    console.log(`[DEBUG] Built context for ${group.name}: meal_count_requested = ${context.meal_count_requested}`)
     return context
   })
 }
@@ -1226,23 +1214,21 @@ export function buildGroupContexts(
 function generateMockMealsForCombinedRequest(
   request: CombinedChatGPTMealRequest
 ): Record<string, GeneratedMeal[]> {
-  console.log(`[DEBUG] generateMockMealsForCombinedRequest called with ${request.groups.length} groups`)
   const mockMeals: Record<string, GeneratedMeal[]> = {}
   
   request.groups.forEach((group, groupIndex) => {
-    console.log(`[DEBUG] Processing group ${group.group_name}: generating ${group.meals_to_generate} meals`)
     const meals: GeneratedMeal[] = []
     
     for (let i = 0; i < group.meals_to_generate; i++) {
       const meal: GeneratedMeal = {
         id: `mock-meal-${Date.now()}-${groupIndex}-${i}`,
-        title: getMockMealTitle(i),
-        description: getMockMealDescription(i),
+        title: getMockMealTitle(i, group.dietary_restrictions),
+        description: getMockMealDescription(i, group.dietary_restrictions),
         prep_time: 15 + (i * 5),
         cook_time: 20 + (i * 10),
         total_time: 35 + (i * 15),
         servings: 4,
-        ingredients: getMockIngredients(i),
+        ingredients: getMockIngredients(i, group.dietary_restrictions),
         instructions: getMockInstructions(i),
         tags: getMockTags(i, group.dietary_restrictions),
         dietary_info: group.dietary_restrictions.length > 0 ? group.dietary_restrictions : ['family-friendly'],
@@ -1253,31 +1239,64 @@ function generateMockMealsForCombinedRequest(
       meals.push(meal)
     }
     
-    console.log(`[DEBUG] Generated ${meals.length} meals for group ${group.group_name}`)
     mockMeals[group.group_name] = meals
   })
   
   const totalMeals = Object.values(mockMeals).reduce((sum, groupMeals) => sum + groupMeals.length, 0)
-  console.log(`[DEBUG] Total mock meals generated: ${totalMeals}`)
   
   return mockMeals
 }
 
-function getMockMealTitle(index: number): string {
-  const titles = [
-    'Spaghetti with Marinara Sauce',
-    'Grilled Chicken and Vegetables',
-    'Beef Stir Fry with Rice',
-    'Baked Salmon with Lemon',
-    'Turkey and Cheese Sandwiches',
-    'Vegetable Curry with Quinoa',
-    'BBQ Pork Ribs',
-    'Chicken Caesar Salad'
-  ]
+function getMockMealTitle(index: number, dietaryRestrictions: string[] = []): string {
+  const isVegetarian = dietaryRestrictions.includes('vegetarian')
+  const isGlutenFree = dietaryRestrictions.includes('gluten-free')
+  
+  let titles: string[]
+  
+  if (isVegetarian && isGlutenFree) {
+    titles = [
+      'Quinoa Vegetable Bowl',
+      'Rice and Bean Burrito Bowl',
+      'Stuffed Bell Peppers',
+      'Vegetable Curry with Rice',
+      'Caprese Salad with Balsamic',
+      'Roasted Vegetable Medley'
+    ]
+  } else if (isVegetarian) {
+    titles = [
+      'Spaghetti with Marinara Sauce',
+      'Vegetable Pasta Primavera',
+      'Quinoa Vegetable Bowl',
+      'Cheese and Mushroom Risotto',
+      'Vegetable Curry with Quinoa',
+      'Caprese Salad with Bread'
+    ]
+  } else if (isGlutenFree) {
+    titles = [
+      'Grilled Chicken with Rice',
+      'Baked Salmon with Vegetables',
+      'Rice and Bean Bowl',
+      'Grilled Steak with Potatoes',
+      'Chicken Stir Fry with Rice',
+      'Fish Tacos with Corn Tortillas'
+    ]
+  } else {
+    titles = [
+      'Spaghetti with Marinara Sauce',
+      'Grilled Chicken and Vegetables',
+      'Beef Stir Fry with Rice',
+      'Baked Salmon with Lemon',
+      'Turkey and Cheese Sandwiches',
+      'Vegetable Curry with Quinoa',
+      'BBQ Pork Ribs',
+      'Chicken Caesar Salad'
+    ]
+  }
+  
   return titles[index % titles.length]
 }
 
-function getMockMealDescription(index: number): string {
+function getMockMealDescription(index: number, dietaryRestrictions: string[] = []): string {
   const descriptions = [
     'A classic Italian pasta dish with rich tomato sauce',
     'Healthy grilled protein with seasonal vegetables',
@@ -1291,27 +1310,74 @@ function getMockMealDescription(index: number): string {
   return descriptions[index % descriptions.length]
 }
 
-function getMockIngredients(index: number): Ingredient[] {
-  const ingredientSets = [
-    [
-      { name: 'Spaghetti pasta', amount: 1, unit: 'lb', category: 'grains' },
-      { name: 'Marinara sauce', amount: 2, unit: 'cups', category: 'condiments' },
-      { name: 'Ground beef', amount: 0.5, unit: 'lb', category: 'protein' },
-      { name: 'Parmesan cheese', amount: 0.5, unit: 'cup', category: 'dairy' }
-    ],
-    [
-      { name: 'Chicken breast', amount: 1.5, unit: 'lbs', category: 'protein' },
-      { name: 'Bell peppers', amount: 2, unit: 'whole', category: 'vegetables' },
-      { name: 'Zucchini', amount: 1, unit: 'whole', category: 'vegetables' },
-      { name: 'Olive oil', amount: 2, unit: 'tbsp', category: 'oils_fats' }
-    ],
-    [
-      { name: 'Beef strips', amount: 1, unit: 'lb', category: 'protein' },
-      { name: 'White rice', amount: 1, unit: 'cup', category: 'grains' },
-      { name: 'Mixed vegetables', amount: 2, unit: 'cups', category: 'frozen' },
-      { name: 'Soy sauce', amount: 3, unit: 'tbsp', category: 'condiments' }
+function getMockIngredients(index: number, dietaryRestrictions: string[] = []): Ingredient[] {
+  const isVegetarian = dietaryRestrictions.includes('vegetarian')
+  const isGlutenFree = dietaryRestrictions.includes('gluten-free')
+  
+  let ingredientSets: Ingredient[][]
+  
+  if (isVegetarian && isGlutenFree) {
+    ingredientSets = [
+      [
+        { name: 'Quinoa', amount: 1, unit: 'cup', category: 'grains' },
+        { name: 'Black beans', amount: 1, unit: 'can', category: 'protein' },
+        { name: 'Bell peppers', amount: 2, unit: 'whole', category: 'vegetables' },
+        { name: 'Olive oil', amount: 2, unit: 'tbsp', category: 'oils_fats' }
+      ],
+      [
+        { name: 'Brown rice', amount: 1, unit: 'cup', category: 'grains' },
+        { name: 'Kidney beans', amount: 1, unit: 'can', category: 'protein' },
+        { name: 'Tomatoes', amount: 2, unit: 'whole', category: 'vegetables' },
+        { name: 'Coconut oil', amount: 1, unit: 'tbsp', category: 'oils_fats' }
+      ]
     ]
-  ]
+  } else if (isVegetarian) {
+    ingredientSets = [
+      [
+        { name: 'Spaghetti pasta', amount: 1, unit: 'lb', category: 'grains' },
+        { name: 'Marinara sauce', amount: 2, unit: 'cups', category: 'condiments' },
+        { name: 'Mozzarella cheese', amount: 0.5, unit: 'cup', category: 'dairy' },
+        { name: 'Fresh basil', amount: 0.25, unit: 'cup', category: 'spices_herbs' }
+      ],
+      [
+        { name: 'Pasta shells', amount: 1, unit: 'lb', category: 'grains' },
+        { name: 'Bell peppers', amount: 2, unit: 'whole', category: 'vegetables' },
+        { name: 'Zucchini', amount: 1, unit: 'whole', category: 'vegetables' },
+        { name: 'Olive oil', amount: 2, unit: 'tbsp', category: 'oils_fats' }
+      ]
+    ]
+  } else if (isGlutenFree) {
+    ingredientSets = [
+      [
+        { name: 'Chicken breast', amount: 1.5, unit: 'lbs', category: 'protein' },
+        { name: 'Brown rice', amount: 1, unit: 'cup', category: 'grains' },
+        { name: 'Broccoli', amount: 2, unit: 'cups', category: 'vegetables' },
+        { name: 'Olive oil', amount: 2, unit: 'tbsp', category: 'oils_fats' }
+      ],
+      [
+        { name: 'Salmon fillet', amount: 1, unit: 'lb', category: 'protein' },
+        { name: 'Sweet potato', amount: 2, unit: 'whole', category: 'vegetables' },
+        { name: 'Green beans', amount: 1, unit: 'cup', category: 'vegetables' },
+        { name: 'Lemon', amount: 1, unit: 'whole', category: 'fruits' }
+      ]
+    ]
+  } else {
+    ingredientSets = [
+      [
+        { name: 'Spaghetti pasta', amount: 1, unit: 'lb', category: 'grains' },
+        { name: 'Marinara sauce', amount: 2, unit: 'cups', category: 'condiments' },
+        { name: 'Ground beef', amount: 0.5, unit: 'lb', category: 'protein' },
+        { name: 'Parmesan cheese', amount: 0.5, unit: 'cup', category: 'dairy' }
+      ],
+      [
+        { name: 'Chicken breast', amount: 1.5, unit: 'lbs', category: 'protein' },
+        { name: 'Bell peppers', amount: 2, unit: 'whole', category: 'vegetables' },
+        { name: 'Zucchini', amount: 1, unit: 'whole', category: 'vegetables' },
+        { name: 'Olive oil', amount: 2, unit: 'tbsp', category: 'oils_fats' }
+      ]
+    ]
+  }
+  
   return ingredientSets[index % ingredientSets.length]
 }
 

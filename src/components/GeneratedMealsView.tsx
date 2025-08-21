@@ -40,9 +40,21 @@ interface GeneratedMealsViewProps {
   jobId?: string
   planId?: string
   onClose?: () => void
+  isPublic?: boolean
 }
 
-export default function GeneratedMealsView({ jobId, planId, onClose }: GeneratedMealsViewProps) {
+interface ShareLinkData {
+  share_url: string
+  token: string
+  job_id: string
+  created_at: string
+  expires_at: string | null
+  access_count: number
+  last_accessed_at: string | null
+  is_existing?: boolean
+}
+
+export default function GeneratedMealsView({ jobId, planId, onClose, isPublic = false }: GeneratedMealsViewProps) {
   const { user } = useAuth()
   const [job, setJob] = useState<MealGenerationJob | null>(null)
   const [meals, setMeals] = useState<GeneratedMeal[]>([])
@@ -50,6 +62,13 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
   const [error, setError] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
   const [selectedMeal, setSelectedMeal] = useState<GeneratedMeal | null>(null)
+  
+  // Sharing state
+  const [showShareModal, setShowShareModal] = useState(false)
+  const [shareData, setShareData] = useState<ShareLinkData | null>(null)
+  const [shareLoading, setShareLoading] = useState(false)
+  const [shareError, setShareError] = useState<string | null>(null)
+  const [copyFeedback, setCopyFeedback] = useState(false)
   
   const supabase = getSupabaseClient()
 
@@ -113,7 +132,7 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
           return acc
         }, [] as { id: string, name: string }[])
         
-        uniqueGroups.forEach(group => {
+        uniqueGroups.forEach((group: { id: string; name: string }) => {
           initialCollapsedState[group.id] = false // false means expanded
         })
         setCollapsedGroups(initialCollapsedState)
@@ -148,12 +167,63 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
     }
   }
 
+  const handleGenerateShareLink = async () => {
+    if (!job?.id) return
+
+    try {
+      setShareLoading(true)
+      setShareError(null)
+
+      const response = await fetch('/api/shared-meals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: job.id })
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to generate share link')
+      }
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to generate share link')
+      }
+
+      setShareData(result.data)
+    } catch (error) {
+      console.error('Error generating share link:', error)
+      setShareError(error instanceof Error ? error.message : 'Failed to generate share link')
+    } finally {
+      setShareLoading(false)
+    }
+  }
+
+  const handleCopyShareLink = async () => {
+    if (!shareData?.share_url) return
+
+    try {
+      await navigator.clipboard.writeText(shareData.share_url)
+      setCopyFeedback(true)
+      setTimeout(() => setCopyFeedback(false), 2000)
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error)
+    }
+  }
+
+  const openShareModal = () => {
+    setShowShareModal(true)
+    setShareError(null)
+    setShareData(null)
+    setCopyFeedback(false)
+  }
+
   const parseGroupRequirements = () => {
-    if (!job?.groups_data) return {}
+    if (!(job as any)?.groups_data) return {}
     
     const requirements: Record<string, number> = {}
     try {
-      const groupsData = Array.isArray(job.groups_data) ? job.groups_data : []
+      const groupsData = Array.isArray((job as any).groups_data) ? (job as any).groups_data : []
       groupsData.forEach((group: any) => {
         if (group.group_id && typeof group.meals_to_generate === 'number') {
           // Calculate original requirement: meals_to_generate = meal_count_requested + 2
@@ -321,15 +391,28 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
               )}
             </div>
             <div className="flex items-center space-x-4">
-              <div className="text-sm text-gray-600">
-                <span className="font-medium">{getSelectedMealsCount()}</span> of {meals.length} meals selected
-              </div>
+              {!isPublic && (
+                <div className="text-sm text-gray-600">
+                  <span className="font-medium">{getSelectedMealsCount()}</span> of {meals.length} meals selected
+                </div>
+              )}
+              {!isPublic && job?.status === 'completed' && (
+                <button
+                  onClick={openShareModal}
+                  className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors"
+                >
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
+                  </svg>
+                  Share
+                </button>
+              )}
               {onClose && (
                 <button
                   onClick={onClose}
                   className="bg-gray-500 hover:bg-gray-600 text-white font-medium py-2 px-4 rounded"
                 >
-                  Back to Dashboard
+                  {isPublic ? 'Close' : 'Back to Dashboard'}
                 </button>
               )}
             </div>
@@ -587,6 +670,188 @@ export default function GeneratedMealsView({ jobId, planId, onClose }: Generated
                   }`}
                 >
                   {selectedMeal.selected ? 'Remove from Plan' : 'Add to Plan'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share Modal */}
+      {showShareModal && !isPublic && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-2/3 lg:w-1/2 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              {/* Modal Header */}
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">Share Meal Plan</h3>
+                <button
+                  onClick={() => setShowShareModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Modal Content */}
+              <div className="space-y-4">
+                {!shareData && !shareLoading && (
+                  <div className="text-center py-6">
+                    <div className="mx-auto h-12 w-12 text-blue-500 mb-4">
+                      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
+                      </svg>
+                    </div>
+                    <h4 className="text-lg font-medium text-gray-900 mb-2">Share this meal plan</h4>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Create a public link that anyone can access to view your generated meals.
+                    </p>
+                    <button
+                      onClick={handleGenerateShareLink}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded"
+                    >
+                      Generate Share Link
+                    </button>
+                  </div>
+                )}
+
+                {shareLoading && (
+                  <div className="text-center py-6">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                    <p className="text-gray-600">Generating share link...</p>
+                  </div>
+                )}
+
+                {shareError && (
+                  <div className="bg-red-50 border border-red-200 rounded-md p-4">
+                    <div className="flex">
+                      <div className="flex-shrink-0">
+                        <svg className="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      <div className="ml-3">
+                        <h3 className="text-sm font-medium text-red-800">Failed to generate share link</h3>
+                        <p className="mt-1 text-sm text-red-700">{shareError}</p>
+                      </div>
+                    </div>
+                    <div className="mt-4">
+                      <button
+                        onClick={handleGenerateShareLink}
+                        className="bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-3 rounded text-sm"
+                      >
+                        Try Again
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {shareData && (
+                  <div className="space-y-4">
+                    {shareData.is_existing && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                        <p className="text-sm text-blue-800">
+                          <span className="font-medium">Existing share link</span> - This meal plan has already been shared.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Share URL */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Share URL
+                      </label>
+                      <div className="flex">
+                        <input
+                          type="text"
+                          readOnly
+                          value={shareData.share_url}
+                          className="flex-1 min-w-0 border border-gray-300 rounded-l-md px-3 py-2 text-sm bg-gray-50"
+                        />
+                        <button
+                          onClick={handleCopyShareLink}
+                          className={`inline-flex items-center px-3 py-2 border border-l-0 border-gray-300 rounded-r-md text-sm font-medium ${
+                            copyFeedback 
+                              ? 'bg-green-50 text-green-700 border-green-300' 
+                              : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          {copyFeedback ? (
+                            <>
+                              <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                              Copied!
+                            </>
+                          ) : (
+                            <>
+                              <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                              </svg>
+                              Copy
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Analytics */}
+                    {shareData.access_count !== undefined && (
+                      <div className="bg-gray-50 rounded-md p-4">
+                        <h4 className="text-sm font-medium text-gray-900 mb-2">Share Analytics</h4>
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <span className="text-gray-600">Views:</span>
+                            <span className="ml-2 font-medium">{shareData.access_count} {shareData.access_count === 1 ? 'view' : 'views'}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">Created:</span>
+                            <span className="ml-2 font-medium">
+                              {new Date(shareData.created_at).toLocaleDateString()}
+                            </span>
+                          </div>
+                          {shareData.last_accessed_at && (
+                            <div className="col-span-2">
+                              <span className="text-gray-600">Last viewed:</span>
+                              <span className="ml-2 font-medium">
+                                {new Date(shareData.last_accessed_at).toLocaleString()}
+                              </span>
+                            </div>
+                          )}
+                          {shareData.expires_at && (
+                            <div className="col-span-2">
+                              <span className="text-gray-600">Expires:</span>
+                              <span className="ml-2 font-medium">
+                                {new Date(shareData.expires_at).toLocaleDateString()}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Instructions */}
+                    <div className="bg-blue-50 rounded-md p-4">
+                      <h4 className="text-sm font-medium text-blue-900 mb-2">How to share</h4>
+                      <ul className="text-sm text-blue-800 space-y-1">
+                        <li>• Copy the link above and share it with anyone</li>
+                        <li>• Recipients can view the meal plan without creating an account</li>
+                        <li>• The shared link shows all generated meals in read-only format</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="flex justify-end mt-6">
+                <button
+                  onClick={() => setShowShareModal(false)}
+                  className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded"
+                >
+                  Close
                 </button>
               </div>
             </div>

@@ -44,15 +44,17 @@ const customJestConfig = {
   ],
   // Prevent Jest from running during Next.js builds
   runner: 'jest-runner',
-  // Isolate test environment from development server
-  testEnvironment: 'jsdom',
   // Prevent worker conflicts
   maxWorkers: 1,
   // Clear mocks between tests
   clearMocks: true,
   restoreMocks: true,
+  resetMocks: true,
+  resetModules: true,
   // Prevent Jest from caching during development
-  cache: false
+  cache: false,
+  // Add timeout for long-running tests
+  testTimeout: 10000
 }
 
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async

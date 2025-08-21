@@ -8,10 +8,13 @@ export async function middleware(request: NextRequest) {
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api/test') ||
+    pathname.startsWith('/api/form-responses') || // Public form submission endpoint
+    pathname.startsWith('/api/forms/') && pathname.includes('/meals') || // Public meal data endpoints
     pathname.startsWith('/auth') ||
     pathname === '/' ||
     pathname === '/favicon.ico' ||
-    pathname.startsWith('/form/') // Public meal selection forms
+    pathname.startsWith('/form/') || // Legacy public meal selection forms
+    pathname.startsWith('/f/') // New shortened URL public forms
   ) {
     return NextResponse.next()
   }

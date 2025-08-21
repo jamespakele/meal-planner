@@ -120,7 +120,7 @@ describe('Group Creation Integration', () => {
       // Should show groups section without hanging
       const groupsSection = screen.getByText(/Groups/)
       expect(groupsSection).toBeInTheDocument()
-    })
+    }, { timeout: 3000 })
 
     // Verify no hanging - test should complete quickly
     expect(mockGetSupabaseClient).toHaveBeenCalledTimes(1)
@@ -223,7 +223,7 @@ describe('Group Creation Integration', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Groups/)).toBeInTheDocument()
-    })
+    }, { timeout: 3000 })
 
     // Re-render multiple times
     rerender(

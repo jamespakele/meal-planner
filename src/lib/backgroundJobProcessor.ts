@@ -18,20 +18,18 @@ export async function processJobInBackground(
     console.log(`[BACKGROUND] Supabase client created successfully`)
     
     console.log(`[BACKGROUND] Updating job ${jobId} to processing status`)
-    // Update job status to processing
-    const updateResult = await supabase
-      .from('meal_generation_jobs')
-      .update({
-        status: 'processing',
-        started_at: new Date().toISOString(),
-        progress: 10,
-        current_step: 'Preparing AI request...'
-      })
-      .eq('id', jobId)
+    // Update job status to processing using SECURITY DEFINER function
+    const { error: updateError } = await supabase.rpc('update_meal_generation_job', {
+      p_job_id: jobId,
+      p_status: 'processing',
+      p_started_at: new Date().toISOString(),
+      p_progress: 10,
+      p_current_step: 'Preparing AI request...'
+    })
 
-    if (updateResult.error) {
-      console.error(`[BACKGROUND] Failed to update job status:`, updateResult.error)
-      throw updateResult.error
+    if (updateError) {
+      console.error(`[BACKGROUND] Failed to update job status:`, updateError)
+      throw updateError
     }
     console.log(`[BACKGROUND] Job status updated successfully`)
 
@@ -50,13 +48,11 @@ export async function processJobInBackground(
     
     console.log('[BACKGROUND] combinedRequest:', JSON.stringify(combinedRequest, null, 2))
 
-    await supabase
-      .from('meal_generation_jobs')
-      .update({
-        progress: 30,
-        current_step: 'Generating meals with AI...'
-      })
-      .eq('id', jobId)
+    await supabase.rpc('update_meal_generation_job', {
+      p_job_id: jobId,
+      p_progress: 30,
+      p_current_step: 'Generating meals with AI...'
+    })
 
     const startTime = Date.now()
 
@@ -65,13 +61,11 @@ export async function processJobInBackground(
 
     const generationTime = Date.now() - startTime
 
-    await supabase
-      .from('meal_generation_jobs')
-      .update({
-        progress: 80,
-        current_step: 'Saving generated meals...'
-      })
-      .eq('id', jobId)
+    await supabase.rpc('update_meal_generation_job', {
+      p_job_id: jobId,
+      p_progress: 80,
+      p_current_step: 'Saving generated meals...'
+    })
 
     // Save generated meals to database
     const mealsToInsert = []
@@ -101,66 +95,59 @@ export async function processJobInBackground(
       }
     }
 
-    // Insert all meals
+    // Insert all meals using SECURITY DEFINER function
     if (mealsToInsert.length > 0) {
-      const { error: mealsError } = await supabase
-        .from('generated_meals')
-        .insert(mealsToInsert)
+      const { error: mealsError } = await supabase.rpc('insert_generated_meals', {
+        p_job_id: jobId,
+        p_meals: mealsToInsert
+      })
 
       if (mealsError) {
         throw new Error(`Failed to save meals: ${mealsError.message}`)
       }
     }
 
-    // Update job as completed
-    await supabase
-      .from('meal_generation_jobs')
-      .update({
-        status: 'completed',
-        progress: 100,
-        current_step: 'Completed',
-        completed_at: new Date().toISOString(),
-        total_meals_generated: totalMealsGenerated,
-        api_calls_made: 1,
-        generation_time_ms: generationTime
-      })
-      .eq('id', jobId)
+    // Update job as completed using SECURITY DEFINER function
+    await supabase.rpc('update_meal_generation_job', {
+      p_job_id: jobId,
+      p_status: 'completed',
+      p_progress: 100,
+      p_current_step: 'Completed',
+      p_completed_at: new Date().toISOString(),
+      p_total_meals_generated: totalMealsGenerated,
+      p_api_calls_made: 1,
+      p_generation_time_ms: generationTime
+    })
 
-    // Create success notification
-    await supabase
-      .from('user_notifications')
-      .insert({
-        user_id: userId,
-        type: 'meal_generation_completed',
-        title: 'Meal generation completed!',
-        message: `${totalMealsGenerated} meals have been generated for "${planData.name}".`,
-        job_id: jobId
-      })
+    // Create success notification using SECURITY DEFINER function
+    await supabase.rpc('insert_user_notification', {
+      p_user_id: userId,
+      p_type: 'meal_generation_completed',
+      p_title: 'Meal generation completed!',
+      p_message: `${totalMealsGenerated} meals have been generated for "${planData.name}".`,
+      p_job_id: jobId
+    })
 
   } catch (error) {
     console.error('Background job processing failed:', error)
     
-    // Update job as failed
+    // Update job as failed using SECURITY DEFINER function
     const supabase = await createClient()
-    await supabase
-      .from('meal_generation_jobs')
-      .update({
-        status: 'failed',
-        completed_at: new Date().toISOString(),
-        error_message: error instanceof Error ? error.message : 'Unknown error',
-        error_details: { error: String(error) }
-      })
-      .eq('id', jobId)
+    await supabase.rpc('update_meal_generation_job', {
+      p_job_id: jobId,
+      p_status: 'failed',
+      p_completed_at: new Date().toISOString(),
+      p_error_message: error instanceof Error ? error.message : 'Unknown error',
+      p_error_details: { error: String(error) }
+    })
 
-    // Create failure notification
-    await supabase
-      .from('user_notifications')
-      .insert({
-        user_id: userId,
-        type: 'meal_generation_failed',
-        title: 'Meal generation failed',
-        message: `Failed to generate meals for "${planData.name}": ${error instanceof Error ? error.message : 'Unknown error'}`,
-        job_id: jobId
-      })
+    // Create failure notification using SECURITY DEFINER function
+    await supabase.rpc('insert_user_notification', {
+      p_user_id: userId,
+      p_type: 'meal_generation_failed',
+      p_title: 'Meal generation failed',
+      p_message: `Failed to generate meals for "${planData.name}": ${error instanceof Error ? error.message : 'Unknown error'}`,
+      p_job_id: jobId
+    })
   }
 }

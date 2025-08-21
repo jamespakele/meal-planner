@@ -160,3 +160,137 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+
+// DELETE /api/plans - Delete a plan
+export async function DELETE(request: NextRequest) {
+  try {
+    // Get authenticated user using cookie-based auth
+    const supabase = await createClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    
+    if (authError || !user) {
+      console.error('Authentication error in plans DELETE:', authError)
+      return NextResponse.json(
+        { success: false, error: 'Authentication required' },
+        { status: 401 }
+      )
+    }
+
+    // Get plan ID from query parameters
+    const { searchParams } = new URL(request.url)
+    const planId = searchParams.get('id')
+
+    if (!planId) {
+      return NextResponse.json(
+        { success: false, error: 'Plan ID is required' },
+        { status: 400 }
+      )
+    }
+
+    // Delete the plan (RLS will ensure user can only delete their own plans through group ownership)
+    const { error: deleteError } = await supabase
+      .from('plans')
+      .delete()
+      .eq('id', planId)
+
+    if (deleteError) {
+      console.error('Error deleting plan:', deleteError)
+      return NextResponse.json(
+        { success: false, error: 'Failed to delete plan' },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json(
+      { success: true, message: 'Plan deleted successfully' },
+      { status: 200 }
+    )
+
+  } catch (error) {
+    console.error('Unexpected error deleting plan:', error)
+    return NextResponse.json(
+      { success: false, error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
+
+// PUT /api/plans - Update a plan
+export async function PUT(request: NextRequest) {
+  try {
+    // Get authenticated user using cookie-based auth
+    const supabase = await createClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    
+    if (authError || !user) {
+      console.error('Authentication error in plans PUT:', authError)
+      return NextResponse.json(
+        { success: false, error: 'Authentication required' },
+        { status: 401 }
+      )
+    }
+
+    // Parse request body
+    let body
+    try {
+      body = await request.json()
+    } catch (error) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid JSON in request body' },
+        { status: 400 }
+      )
+    }
+
+    // Validate required fields
+    const { id, name, week_start, notes } = body
+    
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: 'Plan ID is required' },
+        { status: 400 }
+      )
+    }
+
+    if (!name || !week_start) {
+      return NextResponse.json(
+        { success: false, error: 'Plan name and week_start are required' },
+        { status: 400 }
+      )
+    }
+
+    // Create update data object
+    const updateData = {
+      name: name.trim(),
+      week_start,
+      notes: notes || null
+    }
+
+    // Update plan in Supabase (RLS will ensure user can only update their own plans through group ownership)
+    const { data: updatedPlan, error: updateError } = await supabase
+      .from('plans')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (updateError) {
+      console.error('Error updating plan:', updateError)
+      return NextResponse.json(
+        { success: false, error: 'Failed to update plan' },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json(
+      { success: true, data: updatedPlan },
+      { status: 200 }
+    )
+
+  } catch (error) {
+    console.error('Unexpected error updating plan:', error)
+    return NextResponse.json(
+      { success: false, error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
